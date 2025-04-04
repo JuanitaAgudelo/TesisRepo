@@ -3,7 +3,7 @@ from astropy.time import Time
 import spiceypy as spy
 import numpy as np
 
-def Geo2Eclip(lon, lat, alt, date, frame='ITRF93'):
+def Geo2Eclip(lon, lat, alt, et, frame='ITRF93'):
     """
     Converts geodetic coordinates (latitude, longitude, altitude) of an impact 
     event on Earth to ecliptic J2000 coordinates.
@@ -43,7 +43,7 @@ def Geo2Eclip(lon, lat, alt, date, frame='ITRF93'):
     RP_spice = props[2]  #Polar radius of the reference spheroid.
     f_spice = (RE_spice-RP_spice)/RE_spice # Flattening coefficient.
 
-    et = spy.utc2et(date)  #Convert from UTC to ephemerides time
+    #et = spy.utc2et(date)  #Convert from UTC to ephemerides time
     r_earth_fixed = spy.georec(lon, lat, alt, RE_spice, f_spice)  #Convert geodetic coordinates to rectangular coordinates in the ITRF93 frame (rotante)
     M_itrf2ecl = spy.pxform(frame, 'ECLIPJ2000', et) 
     r_earth_ecl = spy.mxv(M_itrf2ecl, r_earth_fixed)  #from ITRF93 (rotante) frame to inertial frame ECLIPJ2000
