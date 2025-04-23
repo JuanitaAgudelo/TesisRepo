@@ -3,7 +3,7 @@ from astropy.time import Time
 import spiceypy as spy
 import numpy as np
 
-def Geo2Eclip(lon, lat, alt, et, frame='ITRF93'):
+def Geo2Eclip(lon, lat, alt, date=None, et=None, frame='ITRF93'):
     """
     Converts geodetic coordinates (latitude, longitude, altitude) of an impact 
     event on Earth to ecliptic J2000 coordinates.
@@ -42,12 +42,16 @@ def Geo2Eclip(lon, lat, alt, et, frame='ITRF93'):
     RE_spice = props[0]  #Equatorial radius of the reference spheroid.
     RP_spice = props[2]  #Polar radius of the reference spheroid.
     f_spice = (RE_spice-RP_spice)/RE_spice # Flattening coefficient.
+    #print("Equatorial and Polar Radios: ", RE_spice, RP_spice)
 
-    #et = spy.utc2et(date)  #Convert from UTC to ephemerides time
+    if date: 
+        et = spy.utc2et(date)  #Convert from UTC to ephemerides time
+        #print("ET", et)
+    
     r_earth_fixed = spy.georec(lon, lat, alt, RE_spice, f_spice)  #Convert geodetic coordinates to rectangular coordinates in the ITRF93 frame (rotante)
-    M_itrf2ecl = spy.pxform(frame, 'ECLIPJ2000', et) 
-    r_earth_ecl = spy.mxv(M_itrf2ecl, r_earth_fixed)  #from ITRF93 (rotante) frame to inertial frame ECLIPJ2000
-
+    #print("GeoRec", r_earth_fixed)
+    M_ecl = spy.pxform(frame, 'ECLIPJ2000', et) 
+    r_earth_ecl = spy.mxv(M_ecl, r_earth_fixed)  #from ITRF93 (rotante) frame to inertial frame ECLIPJ2000
     return r_earth_ecl
 
 
@@ -66,7 +70,9 @@ def Geo2Rec(lon, lat, alt):
     n, props = spy.bodvrd('399','RADII',3)
     RE_spice = props[0]
     RP_spice = props[2]
+    #print("Equatorial and Polar Radios: ", RE_spice, RP_spice)
     f_spice = (RE_spice-RP_spice)/RE_spice
+    #print(RE_spice, RP_spice)
 
     r_earth_fixed = spy.georec(lon, lat, alt, RE_spice, f_spice)
 
@@ -92,3 +98,32 @@ def z_axis_rotation(x):
 
 def mag(x):
     return (x@x)**0.5
+
+def get_velocity_ecliptic(vx, vy, vz, lon, lat, alt, date=False, et=False):
+    #v en km/s 
+    #date en UTC
+    v = np.array([vx, vy, vz]) 
+    r = Geo2Rec(lon, lat, alt)
+
+    t_sideral = 86164.09053083288 
+    w_earth = 2 * np.pi / t_sideral 
+    omega = np.array([0,0,w_earth]) #rad/s
+
+    v_E = v + spy.vcrss(omega, r) #km/s
+    #v_E, -v, mag(v_E), np.arccos((v@r_irtf)/(np.linalg.norm(v)*np.linalg.norm(r_irtf)))*180/np.pi
+
+    if date:
+        et = spy.utc2et(date)
+
+    mx = spy.pxform('ITRF93', 'ECLIPJ2000', et)
+    v_eclip = spy.mxv(mx, v_E)
+
+    return v_eclip
+
+def change_coord(x):
+    #funcion para trasformar el formato de coordenadas terrestres que da CNEOS
+    if x[-1] == 'N' or x[-1] == 'E':
+        new = float(x[:-1])
+    elif x[-1] == 'S' or x[-1] == 'W':
+        new = -float(x[:-1])
+    return new  
