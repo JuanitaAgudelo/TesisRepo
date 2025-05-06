@@ -127,3 +127,13 @@ def change_coord(x):
     elif x[-1] == 'S' or x[-1] == 'W':
         new = -float(x[:-1])
     return new  
+
+def mean_anomaly(e, E=False, F=False):
+    if E:
+        return E - e*np.sin(E)
+    else: 
+        E = 2 * np.arctan2(np.tan(F/2), ((1 + e)/(1 - e))**(-0.5))
+        return E - e*np.sin(E)
+    
+def size(E, v, rho):
+    return (12*E/(np.pi*rho*v**2))**(1/3)
