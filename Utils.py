@@ -137,3 +137,32 @@ def mean_anomaly(e, E=False, F=False):
     
 def size(E, v, rho):
     return (12*E/(np.pi*rho*v**2))**(1/3)
+
+
+def phi(n, alpha):
+    if n == 1:
+        An = 3.332
+        Bn = 0.631
+        Cn = 0.986
+    else:
+        An = 1.862
+        Bn = 1.218
+        Cn = 0.238
+
+    W = np.exp(-90.56 * np.tan(alpha / 2)**2)
+    phi_ns = 1 - (Cn / (0.119 + (1.1341 * np.sin(alpha)) - (0.754 * np.sin(alpha)**2)))
+    phi_nl = np.exp(-An * np.tan(alpha/2)**Bn)
+    return W * phi_ns + (1 - W)*phi_nl
+
+def H_red(alpha, H):
+    G = 0.15
+    #print('phi_1', phi(n=1, alpha=alpha))
+    #print('phi_1', phi(n=2, alpha=alpha))
+    return H - 2.5*np.log10((1 - G) * phi(n=1, alpha=alpha) + G * phi(n=2, alpha=alpha))
+
+def H_abs(p, D):
+    H = -(1/0.2) * np.log10((D * p**0.5) / 1329.22) 
+    return H 
+
+def V(alpha, r, Delta, H):
+    return H_red(alpha, H) + 5 * np.log10(r * Delta)
