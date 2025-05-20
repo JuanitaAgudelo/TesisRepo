@@ -166,3 +166,9 @@ def H_abs(p, D):
 
 def V(alpha, r, Delta, H):
     return H_red(alpha, H) + 5 * np.log10(r * Delta)
+
+def H_red2(alpha, H):
+    return H * (1 - alpha/180)
+
+def V2(alpha, r, Delta, H):
+    return H_red2(alpha, H) + 5 * np.log10(r * Delta)
