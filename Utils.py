@@ -3,6 +3,11 @@ from astropy.time import Time
 import spiceypy as spy
 import numpy as np
 
+# constants
+G = 6.67430e-11
+M_sun = 1.9891e30
+mu = G*M_sun
+
 def Geo2Eclip(lon, lat, alt, date=None, et=None, frame='ITRF93'):
     """
     Converts geodetic coordinates (latitude, longitude, altitude) of an impact 
@@ -172,3 +177,111 @@ def H_red2(alpha, H):
 
 def V2(alpha, r, Delta, H):
     return H_red2(alpha, H) + 5 * np.log10(r * Delta)
+
+def A(w, Omega, i):
+    try:
+        A = np.cos(w)*np.cos(Omega) - np.cos(i)*np.sin(Omega)*np.sin(w)
+    except Exception as e:
+        print('Error in function A: ', e)
+    return A
+
+def B(w, Omega, i):
+    try:
+        B = np.sin(w)*np.cos(Omega) + np.cos(i)*np.sin(Omega)*np.cos(w)
+    except Exception as e:
+        print('Error in function B: ', e)
+    return B
+
+def C(w, Omega, i):
+    try:
+        C = np.sin(Omega)*np.cos(w) + np.cos(i)*np.cos(Omega)*np.sin(w)
+    except Exception as e:
+        print('Error in function C: ', e)
+    return C
+
+def D(w, Omega, i):
+    try:
+        D = np.sin(Omega)*np.sin(w) - np.cos(i)*np.cos(Omega)*np.cos(w)
+    except Exception as e:
+        print('Error in function D: ', e)
+    return D
+
+def F(w, i):
+    try:
+        F = np.sin(w)*np.sin(i)
+    except Exception as e:
+        print('Error in function F: ', e)
+    return F
+
+def G(w, i):
+    try:
+        G = np.cos(w)*np.sin(i)
+    except Exception as e:
+        print('Error in function G: ', e)
+    return G  
+
+def nu(a):
+    return (mu*a)**0.5
+
+def r(a, e, E):
+    return a*(1-e*np.cos(E))
+
+def h(a, e):
+    return (mu*a*(1-e**2))**0.5
+
+def get_position_vector(a, e, i, w, Omega, E):
+
+    x = a*(np.cos(E) - e)*A(w, Omega, i) - a*(1-e**2)**0.5*np.sin(E)*B(w, Omega, i)
+    y = a*(np.cos(E) - e)*C(w, Omega, i) - a*(1-e**2)**0.5*np.sin(E)*D(w, Omega, i)
+    z = a*(np.cos(E) - e)*F(w, i) + a*(1-e**2)**0.5*np.sin(E)*G(w, i)
+
+    return np.array([x, y, z])
+
+def get_velocity_vector(a, e, i, w, Omega, E):
+
+    term = mu*a/(h(a, e)*r(a, e, E))
+    vx = - term * (np.cos(E) - e) * B(w, Omega, i) - term * (1-e**2)**0.5 * np.sin(E) * A(w, Omega, i) - (mu*e/h(a, e)) * B(w, Omega, i)
+    vy = - term * (np.cos(E) - e) * D(w, Omega, i) - term * (1-e**2)**0.5 * np.sin(E) * C(w, Omega, i) - (mu*e/h(a, e))*D(w, Omega, i)
+    vz = term * (np.cos(E) - e) * G(w, i) - term * (1-e**2)**0.5 * np.sin(E) * F(w, i) + (mu*e/h(a, e)) * G(w, i)
+    
+    return np.array([vx, vy, vz])
+
+def get_state_vector(a, e, i, w, Omega, E):
+    
+    position = get_position_vector(a, e, i, w, Omega, E)
+    velocity = get_velocity_vector(a, e, i, w, Omega, E)
+
+    return np.concatenate((position, velocity))
+
+def get_derived_velocity_vector(a, e, i, w, Omega, E):
+
+    nu = nu(a)
+    r = r(a, e, E)
+
+    vx = -(nu/r)*np.sin(E)*A(w, Omega, i) - (nu/r)*(1-e**2)**0.5*np.cos(E)*B(w, Omega, i)
+    vy = -(nu/r)*np.sin(E)*C(w, Omega, i) - (nu/r)*(1-e**2)**0.5*np.cos(E)*D(w, Omega, i)
+    vz = -(nu/r)*np.sin(E)*F(w, i) + (nu/r)*(1-e**2)**0.5*np.cos(E)*G(w, i)
+    
+    return np.array([vx, vy, vz])
+
+def partial_aX(e, i, w, Omega, E):
+    return (np.cos(E) - e)*A(w, Omega, i) - (1-e**2)**0.5*np.sin(E)*B(w, Omega, i)
+
+def partial_aY(e, i, w, Omega, E):
+    return (np.cos(E) - e)*C(w, Omega, i) - (1-e**2)**0.5*np.sin(E)*D(w, Omega, i)
+
+def partial_aZ(e, i, w, E):
+    return (np.cos(E) - e)*F(w, i) + (1-e**2)**0.5*np.sin(E)*G(w, i)
+
+def partial_aVx(e, i, w, Omega, E):
+    return (np.cos(E) - e)*A(w, Omega, i) - (1-e**2)**0.5*np.sin(E)*B(w, Omega, i)
+
+def partial_aVy(e, i, w, Omega, E):
+    return (np.cos(E) - e)*A(w, Omega, i) - (1-e**2)**0.5*np.sin(E)*B(w, Omega, i)
+
+def partial_aVz(e, i, w, Omega, E):
+    return (np.cos(E) - e)*A(w, Omega, i) - (1-e**2)**0.5*np.sin(E)*B(w, Omega, i)
+
+
+
+#def jaccobian(a, e, i, w, Omega, E):
