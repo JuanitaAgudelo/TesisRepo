@@ -178,47 +178,30 @@ def H_red2(alpha, H):
 def V2(alpha, r, Delta, H):
     return H_red2(alpha, H) + 5 * np.log10(r * Delta)
 
-def A(w, Omega, i):
-    try:
-        A = np.cos(w)*np.cos(Omega) - np.cos(i)*np.sin(Omega)*np.sin(w)
-    except Exception as e:
-        print('Error in function A: ', e)
-    return A
 
-def B(w, Omega, i):
+def compute_function(i, w, Omega, which=None):
     try:
-        B = np.sin(w)*np.cos(Omega) + np.cos(i)*np.sin(Omega)*np.cos(w)
-    except Exception as e:
-        print('Error in function B: ', e)
-    return B
+        results = {}
 
-def C(w, Omega, i):
-    try:
-        C = np.sin(Omega)*np.cos(w) + np.cos(i)*np.cos(Omega)*np.sin(w)
-    except Exception as e:
-        print('Error in function C: ', e)
-    return C
+        if which is None or 'A' in which:
+            results['A'] = np.cos(w)*np.cos(Omega) - np.cos(i)*np.sin(Omega)*np.sin(w)
+        if which is None or 'B' in which:
+            results['B'] = np.sin(w)*np.cos(Omega) + np.cos(i)*np.sin(Omega)*np.cos(w)
+        if which is None or 'C' in which:
+            results['C'] = np.sin(Omega)*np.cos(w) + np.cos(i)*np.cos(Omega)*np.sin(w)
+        if which is None or 'D' in which:
+            results['D'] = np.sin(Omega)*np.sin(w) - np.cos(i)*np.cos(Omega)*np.cos(w)
+        if which is None or 'F' in which:
+            results['F'] = np.sin(w)*np.sin(i)
+        if which is None or 'G' in which:
+            results['G'] = np.cos(w)*np.sin(i)
+        else:
+            print('Error in compute_function: which is not valid')
 
-def D(w, Omega, i):
-    try:
-        D = np.sin(Omega)*np.sin(w) - np.cos(i)*np.cos(Omega)*np.cos(w)
     except Exception as e:
-        print('Error in function D: ', e)
-    return D
-
-def F(w, i):
-    try:
-        F = np.sin(w)*np.sin(i)
-    except Exception as e:
-        print('Error in function F: ', e)
-    return F
-
-def G(w, i):
-    try:
-        G = np.cos(w)*np.sin(i)
-    except Exception as e:
-        print('Error in function G: ', e)
-    return G  
+        print('Error in compute_function: ', e)
+    
+    return results
 
 def nu(a):
     return (mu*a)**0.5
@@ -231,23 +214,26 @@ def h(a, e):
 
 def get_position_vector(a, e, i, w, Omega, E):
 
-    x = a*(np.cos(E) - e)*A(w, Omega, i) - a*(1-e**2)**0.5*np.sin(E)*B(w, Omega, i)
-    y = a*(np.cos(E) - e)*C(w, Omega, i) - a*(1-e**2)**0.5*np.sin(E)*D(w, Omega, i)
-    z = a*(np.cos(E) - e)*F(w, i) + a*(1-e**2)**0.5*np.sin(E)*G(w, i)
+    function = compute_function(i, w, Omega, which={'A', 'B', 'C', 'D', 'F', 'G'})
+
+    x = a*(np.cos(E) - e)*function['A'] - a*(1-e**2)**0.5*np.sin(E)*function['B']
+    y = a*(np.cos(E) - e)*function['C'] - a*(1-e**2)**0.5*np.sin(E)*function['D']
+    z = a*(np.cos(E) - e)*function['F'] + a*(1-e**2)**0.5*np.sin(E)*function['G']
 
     return np.array([x, y, z])
 
 def get_velocity_vector(a, e, i, w, Omega, E):
 
     term = mu*a/(h(a, e)*r(a, e, E))
-    vx = - term * (np.cos(E) - e) * B(w, Omega, i) - term * (1-e**2)**0.5 * np.sin(E) * A(w, Omega, i) - (mu*e/h(a, e)) * B(w, Omega, i)
-    vy = - term * (np.cos(E) - e) * D(w, Omega, i) - term * (1-e**2)**0.5 * np.sin(E) * C(w, Omega, i) - (mu*e/h(a, e))*D(w, Omega, i)
-    vz = term * (np.cos(E) - e) * G(w, i) - term * (1-e**2)**0.5 * np.sin(E) * F(w, i) + (mu*e/h(a, e)) * G(w, i)
+    function = compute_function(i, w, Omega, which={'A', 'B', 'C', 'D', 'F', 'G'})
+    vx = - term*(np.cos(E) - e)*function['B'] - term * (1-e**2)**0.5 * np.sin(E) * function['A'] - (mu*e/h(a, e)) * function['B']
+    vy = - term*(np.cos(E) - e)*function['D'] - term * (1-e**2)**0.5 * np.sin(E) * function['C'] - (mu*e/h(a, e))*function['D']
+    vz = term*(np.cos(E) - e)*function['G'] - term * (1-e**2)**0.5 * np.sin(E) * function['F'] + (mu*e/h(a, e)) * function['G']
     
     return np.array([vx, vy, vz])
 
 def get_state_vector(a, e, i, w, Omega, E):
-    
+
     position = get_position_vector(a, e, i, w, Omega, E)
     velocity = get_velocity_vector(a, e, i, w, Omega, E)
 
@@ -264,6 +250,85 @@ def get_derived_velocity_vector(a, e, i, w, Omega, E):
     
     return np.array([vx, vy, vz])
 
+def compute_derivatives(i, w, Omega, respect_to=None, which=None):
+    try:
+        results = {}
+        if respect_to == 'i':
+            if which is None or 'A' in which:
+                results['A'] = np.sin(i)*np.sin(Omega)*np.sin(w)
+            if which is None or 'B' in which:
+                results['B'] = -np.sin(i)*np.sin(Omega)*np.cos(w)
+            if which is None or 'C' in which:
+                results['C'] = -np.sin(i)*np.cos(Omega)*np.sin(w)
+            if which is None or 'D' in which:
+                results['D'] = -np.sin(i)*np.cos(Omega)*np.cos(w)
+            if which is None or 'F' in which:
+                results['F'] = np.sin(w)*np.cos(i)
+            if which is None or 'G' in which:
+                results['G'] = np.cos(w)*np.cos(i)
+            else:
+                print('Error in compute_derivatives: which is not valid')
+        
+        elif respect_to == 'w':
+            if which is None or 'A' in which:
+                results['A'] = -np.cos(Omega)*np.sin(w) - np.cos(i)*np.cos(Omega)*np.cos(w)
+            if which is None or 'B' in which:
+                results['B'] = np.sin(Omega)*np.cos(w) - np.cos(i)*np.sin(Omega)*np.sin(w)
+            if which is None or 'C' in which:
+                results['C'] = -np.sin(Omega)*np.sin(w) + np.cos(i)*np.cos(Omega)*np.cos(w)
+            if which is None or 'D' in which:
+                results['D'] = np.sin(Omega)*np.sin(w) + np.cos(i)*np.cos(Omega)*np.sin(w)
+            if which is None or 'F' in which:
+                results['F'] = np.cos(w)*np.sin(i)
+            if which is None or 'G' in which:
+                results['G'] = -np.sin(w)*np.sin(i)
+            else:
+                print('Error in compute_derivatives: which is not valid')
+        
+        elif respect_to == 'Omega':
+            if which is None or 'A' in which:
+                results['A'] = -np.sin(Omega)*np.cos(w) - np.cos(i)*np.cos(Omega)*np.sin(w)
+            if which is None or 'B' in which:
+                results['B'] = -np.sin(Omega)*np.sin(w) + np.cos(i)*np.cos(Omega)*np.cos(w)
+            if which is None or 'C' in which:
+                results['C'] = np.cos(Omega)*np.cos(w) - np.cos(i)*np.sin(Omega)*np.sin(w)
+            if which is None or 'D' in which:
+                results['D'] = np.cos(Omega)*np.sin(w) + np.cos(i)*np.sin(Omega)*np.cos(w)
+            if which is None or 'F' in which:
+                results['F'] = 0
+            if which is None or 'G' in which:
+                results['G'] = 0
+            else:
+                print('Error in compute_derivatives: which is not valid')
+        else:
+            print('Error in compute_derivatives: respect_to is not valid')
+
+    except Exception as e:
+        print('Error in compute_derivatives: ', e)
+    
+    return results
+
+#----------------Derivates respecto to a----------------
+def partial_aX(e, i, w, Omega, E):
+    return (np.cos(E) - e)*A(w, Omega, i) - (1-e**2)**0.5*np.sin(E)*B(w, Omega, i)
+
+def partial_aY(e, i, w, Omega, E):
+    return (np.cos(E) - e)*C(w, Omega, i) - (1-e**2)**0.5*np.sin(E)*D(w, Omega, i)
+
+def partial_aZ(e, i, w, E):
+    return (np.cos(E) - e)*F(w, i) + (1-e**2)**0.5*np.sin(E)*G(w, i)
+
+def partial_aVx(a, e, i, w, Omega, E):
+    return nu(a)/(2*r(a, e, E))*np.sin(E)*A(w, Omega, i) + nu(a)/(2*r(a, e, E))*(1-e**2)**0.5*np.cos(E)*B(w, Omega, i)
+
+def partial_aVy(a, e, i, w, Omega, E):
+    return nu(a)/(2*r(a, e, E))*np.sin(E)*C(w, Omega, i) + nu(a)/(2*r(a, e, E))*(1-e**2)**0.5*np.cos(E)*D(w, Omega, i)
+
+def partial_aVz(a, e, i, w, E):
+    return nu(a)/(2*r(a, e, E))*np.sin(E)*F(w, i) - nu(a)/(2*r(a, e, E))*(1-e**2)**0.5*np.cos(E)*G(w, i)
+
+
+#----------------Derivates respecto e----------------
 def partial_aX(e, i, w, Omega, E):
     return (np.cos(E) - e)*A(w, Omega, i) - (1-e**2)**0.5*np.sin(E)*B(w, Omega, i)
 
@@ -283,5 +348,123 @@ def partial_aVz(e, i, w, Omega, E):
     return (np.cos(E) - e)*A(w, Omega, i) - (1-e**2)**0.5*np.sin(E)*B(w, Omega, i)
 
 
+#----------------Derivates respecto i----------------
+
+def partial_iX(a, e, i, w, Omega, E):
+    partial_i = compute_derivatives(i, w, Omega, respect_to='i', which={'A', 'B'})
+    return a*(np.cos(E) - e)*partial_i['A'] - a*(1-e**2)**0.5*np.sin(E)*partial_i['B']
+
+def partial_iY(a, e, i, w, Omega, E):
+    partial_i = compute_derivatives(i, w, Omega, respect_to='i', which={'C', 'D'})
+    return a*(np.cos(E) - e)*partial_i['C'] - a*(1-e**2)**0.5*np.sin(E)*partial_i['D']
+
+def partial_iZ(a, e, i, w, Omega, E):
+    partial_i = compute_derivatives(i, w, Omega, respect_to='i', which={'F', 'G'})
+    return a*(np.cos(E) - e)*partial_i['F'] + a*(1-e**2)**0.5*np.sin(E)*partial_i['G']
+
+def partial_iVx(a, e, i, w, Omega, E):
+    partial_i = compute_derivatives(i, w, Omega, respect_to='i', which={'A', 'B'})
+    nu_r = nu(a)/r(a, e, E)
+    return -nu_r*np.sin(E)*partial_i['A'] - nu_r*(1-e**2)**0.5*np.cos(E)*partial_i['B']
+
+def partial_iVy(a, e, i, w, Omega, E):
+    partial_i = compute_derivatives(i, w, Omega, respect_to='i', which={'C', 'D'})
+    nu_r = nu(a)/r(a, e, E)
+    return -nu_r*np.sin(E)*partial_i['C'] - nu_r*(1-e**2)**0.5*np.cos(E)*partial_i['D']
+
+def partial_iVz(a, e, i, w, Omega, E):
+    partial_i = compute_derivatives(i, w, Omega, respect_to='i', which={'F', 'G'})
+    nu_r = nu(a)/r(a, e, E)
+    return -nu_r*np.sin(E)*partial_i['F'] + nu_r*(1-e**2)**0.5*np.cos(E)*partial_i['G']
+
+
+#----------------Derivates respecto w----------------
+def partial_wX(a, e, i, w, Omega, E):
+    partial_w = compute_derivatives(i, w, Omega, respect_to='w', which={'A', 'B'})
+    return a*(np.cos(E) - e)*partial_w['A'] - a*(1-e**2)**0.5*np.sin(E)*partial_w['B']
+
+def partial_wY(a, e, i, w, Omega, E):
+    partial_w = compute_derivatives(i, w, Omega, respect_to='w', which={'C', 'D'})
+    return a*(np.cos(E) - e)*partial_w['C'] - a*(1-e**2)**0.5*np.sin(E)*partial_w['D']
+
+def partial_wZ(a, e, i, w, Omega, E):
+    partial_w = compute_derivatives(i, w, Omega, respect_to='w', which={'F', 'G'})
+    return a*(np.cos(E) - e)*partial_w['F'] + a*(1-e**2)**0.5*np.sin(E)*partial_w['G']
+
+def partial_wVx(a, e, i, w, Omega, E):
+    partial_w = compute_derivatives(i, w, Omega, respect_to='w', which={'A', 'B'})
+    nu_r = nu(a)/r(a, e, E)
+    return -nu_r*np.sin(E)*partial_w['A'] - nu_r*(1-e**2)**0.5*np.cos(E)*partial_w['B']
+
+def partial_wVy(a, e, i, w, Omega, E):
+    partial_w = compute_derivatives(i, w, Omega, respect_to='w', which={'C', 'D'})
+    nu_r = nu(a)/r(a, e, E)
+    return -nu_r*np.sin(E)*partial_w['C'] - nu_r*(1-e**2)**0.5*np.cos(E)*partial_w['D']
+
+def partial_wVz(a, e, i, w, Omega, E):
+    partial_w = compute_derivatives(i, w, Omega, respect_to='w', which={'F', 'G'})
+    nu_r = nu(a)/r(a, e, E)
+    return -nu_r*np.sin(E)*partial_w['F'] + nu_r*(1-e**2)**0.5*np.cos(E)*partial_w['G']
+
+
+#----------------Derivates respecto Omega----------------
+def partial_OmegaX(a, e, i, w, Omega, E):
+    partial_Omega = compute_derivatives(i, w, Omega, respect_to='Omega', which={'A', 'B'})
+    return a*(np.cos(E) - e)*partial_Omega['A'] - a*(1-e**2)**0.5*np.sin(E)*partial_Omega['B']
+
+def partial_OmegaY(a, e, i, w, Omega, E):
+    partial_Omega = compute_derivatives(i, w, Omega, respect_to='Omega', which={'C', 'D'})
+    return a*(np.cos(E) - e)*partial_Omega['C'] - a*(1-e**2)**0.5*np.sin(E)*partial_Omega['D']
+
+def partial_OmegaZ(a, e, i, w, Omega, E):
+    partial_Omega = compute_derivatives(i, w, Omega, respect_to='Omega', which={'F', 'G'})
+    return a*(np.cos(E) - e)*partial_Omega['F'] + a*(1-e**2)**0.5*np.sin(E)*partial_Omega['G']
+
+def partial_OmegaVx(a, e, i, w, Omega, E):
+    partial_Omega = compute_derivatives(i, w, Omega, respect_to='Omega', which={'A', 'B'})
+    nu_r = nu(a)/r(a, e, E)
+    return -nu_r*np.sin(E)*partial_Omega['A'] - nu_r*(1-e**2)**0.5*np.cos(E)*partial_Omega['B']
+
+def partial_OmegaVy(a, e, i, w, Omega, E):
+    partial_Omega = compute_derivatives(i, w, Omega, respect_to='Omega', which={'C', 'D'})
+    nu_r = nu(a)/r(a, e, E)
+    return -nu_r*np.sin(E)*partial_Omega['C'] - nu_r*(1-e**2)**0.5*np.cos(E)*partial_Omega['D']
+
+def partial_OmegaVz(a, e, i, w, Omega, E):
+    partial_Omega = compute_derivatives(i, w, Omega, respect_to='Omega', which={'F', 'G'})
+    nu_r = nu(a)/r(a, e, E)
+    return -nu_r*np.sin(E)*partial_Omega['F'] + nu_r*(1-e**2)**0.5*np.cos(E)*partial_Omega['G']
+
+
+#----------------Derivates respecto Mean Anomaly----------------
+def partial_MX(a, e, i, w, Omega, E):
+    a_r = a**2/r(a, e, E)
+    return -a_r*np.sin(E)*A() - a*(1-e**2)**0.5*np.sin(E)*partial_Omega['B']
+
+def partial_OmegaY(a, e, i, w, Omega, E):
+    partial_Omega = compute_derivatives(i, w, Omega, respect_to='Omega', which={'C', 'D'})
+    return a*(np.cos(E) - e)*partial_Omega['C'] - a*(1-e**2)**0.5*np.sin(E)*partial_Omega['D']
+
+def partial_OmegaZ(a, e, i, w, Omega, E):
+    partial_Omega = compute_derivatives(i, w, Omega, respect_to='Omega', which={'F', 'G'})
+    return a*(np.cos(E) - e)*partial_Omega['F'] + a*(1-e**2)**0.5*np.sin(E)*partial_Omega['G']
+
+def partial_OmegaVx(a, e, i, w, Omega, E):
+    partial_Omega = compute_derivatives(i, w, Omega, respect_to='Omega', which={'A', 'B'})
+    nu_r = nu(a)/r(a, e, E)
+    return -nu_r*np.sin(E)*partial_Omega['A'] - nu_r*(1-e**2)**0.5*np.cos(E)*partial_Omega['B']
+
+def partial_OmegaVy(a, e, i, w, Omega, E):
+    partial_Omega = compute_derivatives(i, w, Omega, respect_to='Omega', which={'C', 'D'})
+    nu_r = nu(a)/r(a, e, E)
+    return -nu_r*np.sin(E)*partial_Omega['C'] - nu_r*(1-e**2)**0.5*np.cos(E)*partial_Omega['D']
+
+def partial_OmegaVz(a, e, i, w, Omega, E):
+    partial_Omega = compute_derivatives(i, w, Omega, respect_to='Omega', which={'F', 'G'})
+    nu_r = nu(a)/r(a, e, E)
+    return -nu_r*np.sin(E)*partial_Omega['F'] + nu_r*(1-e**2)**0.5*np.cos(E)*partial_Omega['G']
+
+
+#----------------Jaccobian----------------
 
 #def jaccobian(a, e, i, w, Omega, E):
