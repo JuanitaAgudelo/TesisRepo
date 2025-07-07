@@ -2,7 +2,7 @@ import pandas as pd
 from astropy.time import Time
 import spiceypy as spy
 import numpy as np
-import numba
+from dataclasses import dataclass
 
 # constants
 G = 6.67430e-11 # m^3 / (kg s^2)
@@ -48,16 +48,19 @@ def Geo2Eclip(lon, lat, alt, date=None, et=None, frame='ITRF93'):
     RE_spice = props[0]  #Equatorial radius of the reference spheroid.
     RP_spice = props[2]  #Polar radius of the reference spheroid.
     f_spice = (RE_spice-RP_spice)/RE_spice # Flattening coefficient.
+    r_earth_fixed = spy.georec(lon, lat, alt, RE_spice, f_spice)
     #print("Equatorial and Polar Radios: ", RE_spice, RP_spice)
 
     if date: 
         et = spy.utc2et(date)  #Convert from UTC to ephemerides time
         #print("ET", et)
     
-    r_earth_fixed = spy.georec(lon, lat, alt, RE_spice, f_spice)  #Convert geodetic coordinates to rectangular coordinates in the ITRF93 frame (rotante)
-    #print("GeoRec", r_earth_fixed)
-    M_ecl = spy.pxform(frame, 'ECLIPJ2000', et) 
-    r_earth_ecl = spy.mxv(M_ecl, r_earth_fixed)  #from ITRF93 (rotante) frame to inertial frame ECLIPJ2000
+        r_earth_fixed = spy.georec(lon, lat, alt, RE_spice, f_spice)  #Convert geodetic coordinates to rectangular coordinates in the ITRF93 frame (rotante)
+        #print("GeoRec", r_earth_fixed)
+        M_ecl = spy.pxform(frame, 'ECLIPJ2000', et) 
+        r_earth_ecl = spy.mxv(M_ecl, r_earth_fixed)  #from ITRF93 (rotante) frame to inertial frame ECLIPJ2000
+    else: 
+        print('et: ephemeris time is not provided')    
     return r_earth_ecl
 
 
@@ -99,31 +102,92 @@ def Geo2Eclip2(lon, lat, alt, date):
 
     return r_earth_ecl
 
-def z_axis_rotation(x):
+def z_axis_rotation(x: float) -> np.ndarray:
     return np.array([[np.cos(x), -np.sin(x), 0],[np.sin(x), np.cos(x), 0],[0,0,1]])
 
-def mag(x):
+def mag(x) -> float:
+    """
+    Compute the magnitude of a vector.
+    
+    Parameters:
+    -----------
+    x : array-like
+        Input vector (can be list, tuple, numpy array, etc.)
+        
+    Returns:
+    --------
+    float
+        Magnitude of the vector
+    """
     return (x@x)**0.5
 
-def get_velocity_ecliptic(vx, vy, vz, lon, lat, alt, date=False, et=False):
-    #v en km/s 
-    #date en UTC
-    v = np.array([vx, vy, vz]) 
+def get_velocity_ecliptic(vx: float, vy: float, vz: float, lon: float, lat: float, alt: float, 
+                         date: str | None = None, et: float | None = None) -> np.ndarray:
+    """
+    Convert velocity vector from Earth-fixed to ecliptic J2000 coordinates.
+    
+    This function takes a velocity vector in Earth-fixed coordinates and converts it
+    to ecliptic J2000 coordinates, accounting for Earth's rotation.
+    
+    Parameters:
+    -----------
+    vx, vy, vz : float
+        Velocity components in Earth-fixed coordinates [km/s]
+    lon, lat : float
+        Geodetic longitude and latitude of the observation point [degrees]
+    alt : float
+        Altitude above Earth's reference spheroid [km]
+    date : str, optional
+        UTC date and time in format 'YYYY-MM-DD HH:MM:SS'
+        Must be provided if et is not provided
+    et : float, optional
+        Ephemeris time (ET) in seconds past J2000
+        Must be provided if date is not provided
+        
+    Returns:
+    --------
+    v_eclip : np.ndarray
+        Velocity vector in ecliptic J2000 coordinates [km/s]
+        
+    Raises:
+    -------
+    ValueError
+        If neither date nor et is provided, or if both are provided
+        
+    Notes:
+    ------
+    The function accounts for Earth's rotation by adding the cross product
+    of Earth's angular velocity and the position vector to the input velocity.
+    """
+    # Input validation
+    if date is not None and et is not None:
+        raise ValueError("Provide either 'date' or 'et', not both")
+    if date is None and et is None:
+        raise ValueError("Either 'date' or 'et' must be provided")
+    
+    # Convert velocity to numpy array
+    v = np.array([vx, vy, vz])
+    
+    # Get position vector in Earth-fixed coordinates
     r = Geo2Rec(lon, lat, alt)
-
-    t_sideral = 86164.09053083288 
-    w_earth = 2 * np.pi / t_sideral 
-    omega = np.array([0,0,w_earth]) #rad/s
-
-    v_E = v + spy.vcrss(omega, r) #km/s
-    #v_E, -v, mag(v_E), np.arccos((v@r_irtf)/(np.linalg.norm(v)*np.linalg.norm(r_irtf)))*180/np.pi
-
-    if date:
+    
+    # Earth's rotation parameters
+    t_sidereal = 86164.09053083288  # Sidereal day in seconds
+    w_earth = 2 * np.pi / t_sidereal  # Earth's angular velocity [rad/s]
+    omega = np.array([0, 0, w_earth])
+    
+    # Add Earth's rotation contribution to velocity
+    v_E = v + spy.vcrss(omega, r)  # Velocity in Earth-fixed frame [km/s]
+    
+    # Convert ephemeris time if date is provided
+    if date is not None:
         et = spy.utc2et(date)
-
-    mx = spy.pxform('ITRF93', 'ECLIPJ2000', et)
+    
+    # Transform from Earth-fixed to ecliptic J2000 coordinates
+    # At this point, et is guaranteed to be a float due to input validation
+    mx = spy.pxform('ITRF93', 'ECLIPJ2000', et)  # type: ignore
     v_eclip = spy.mxv(mx, v_E)
-
+    
     return v_eclip
 
 def change_coord(x):
@@ -182,406 +246,193 @@ def V2(alpha, r, Delta, H):
 def Kepler(E, M, e):
     return E - e * np.sin(E) - M
 
-def compute_function(i, w, Omega, which):
-    try:
-        results = {}
-        if 'A' in which:
-            results['A'] = np.cos(w)*np.cos(Omega) - np.cos(i)*np.sin(Omega)*np.sin(w)
-        if 'B' in which:
-            results['B'] = np.sin(w)*np.cos(Omega) + np.cos(i)*np.sin(Omega)*np.cos(w)
-        if 'C' in which:
-            results['C'] = np.sin(Omega)*np.cos(w) + np.cos(i)*np.cos(Omega)*np.sin(w)
-        if 'D' in which:
-            results['D'] = np.sin(Omega)*np.sin(w) - np.cos(i)*np.cos(Omega)*np.cos(w)
-        if 'F' in which:
-            results['F'] = np.sin(w)*np.sin(i)
-        if 'G' in which:
-            results['G'] = np.cos(w)*np.sin(i)
+@dataclass
+class OrbitalElements:
+    a: float 
+    e: float 
+    i: float 
+    Omega: float 
+    w: float 
+    E: float
 
-    except Exception as e:
-        print('Error in compute_function: ', e)
+class OrbitTrasformations:
+
+    @staticmethod
+    def sqrt_e(e: float) -> float:
+        return (1-e**2)**0.5
+
+    @staticmethod
+    def nu(a: float) -> float:
+        return (mu*a)**0.5
     
-    return results
+    @staticmethod
+    def r(a: float, e: float, E: float) -> float:
+        return a*(1 - e*np.cos(E))
 
-def nu(a):
-    return (mu*a)**0.5
+    @staticmethod
+    def h(a: float, e: float) -> float:
+        return (mu*a*(1-e**2))**0.5
 
-def r(a, e, E):
-    return a*(1 - e*np.cos(E))
+    @staticmethod
+    def Matrix_trasformation(i: float, w: float, Omega: float) -> np.ndarray:
+        Matrix = np.zeros((3, 3))
 
-def h(a, e):
-    return (mu*a*(1-e**2))**0.5
+        Matrix[0, 0] = np.cos(Omega)*np.cos(w) - np.sin(Omega)*np.cos(i)*np.sin(w)
+        Matrix[0, 1] = -np.cos(Omega)*np.sin(w) - np.sin(Omega)*np.cos(i)*np.cos(w)
+        Matrix[0, 2] = np.sin(Omega)*np.sin(i)
 
-def sqrt_e(e):
-    return (1-e**2)**0.5
+        Matrix[1, 0] = np.sin(Omega)*np.cos(w) + np.cos(Omega)*np.cos(i)*np.sin(w)
+        Matrix[1, 1] = -np.sin(Omega)*np.sin(w) + np.cos(Omega)*np.cos(i)*np.cos(w)
+        Matrix[1, 2] = -np.cos(Omega)*np.sin(i)
 
-def get_position_vector(a, e, i, w, Omega, E):
+        Matrix[2, 0] = np.sin(i)*np.sin(w)
+        Matrix[2, 1] = np.sin(i)*np.cos(w)
+        Matrix[2, 2] = np.cos(i)
 
-    function = compute_function(i, w, Omega, which={'A', 'B', 'C', 'D', 'F', 'G'})
+        return Matrix
 
-    x = a*(np.cos(E) - e)*function['A'] - a*sqrt_e(e)*np.sin(E)*function['B']
-    y = a*(np.cos(E) - e)*function['C'] - a*sqrt_e(e)*np.sin(E)*function['D']
-    z = a*(np.cos(E) - e)*function['F'] + a*sqrt_e(e)*np.sin(E)*function['G']
+    @staticmethod
+    def state_vector(elements: OrbitalElements) -> np.ndarray:
+        a = elements.a
+        e = elements.e
+        i = elements.i
+        w = elements.w
+        Omega = elements.Omega
+        E = elements.E
 
-    return np.array([x, y, z])
+        Matrix = OrbitTrasformations.Matrix_trasformation(i, w, Omega)
+        ot = OrbitTrasformations()
+        v_r = ot.nu(a)/ot.r(a, e, E)
 
-def get_velocity_vector(a, e, i, w, Omega, E):
+        position = a * Matrix@np.array([np.cos(E) - e, ot.sqrt_e(e)*np.sin(E), 0])
+        velocity = v_r * Matrix@np.array([-np.sin(E), ot.sqrt_e(e)*np.cos(E), 0])
 
-    term = mu*a/(h(a, e)*r(a, e, E))
-    function = compute_function(i, w, Omega, which={'A', 'B', 'C', 'D', 'F', 'G'})
-    vx = - term*(np.cos(E) - e)*function['B'] - term * (1-e**2)**0.5 * np.sin(E) * function['A'] - (mu*e/h(a, e)) * function['B']
-    vy = - term*(np.cos(E) - e)*function['D'] - term * (1-e**2)**0.5 * np.sin(E) * function['C'] - (mu*e/h(a, e))*function['D']
-    vz = term*(np.cos(E) - e)*function['G'] - term * (1-e**2)**0.5 * np.sin(E) * function['F'] + (mu*e/h(a, e)) * function['G']
+        return np.concatenate((position, velocity))
+
+
+class JaccobianComponents:
+
+    @staticmethod
+    def partial_a(elements: OrbitalElements) -> np.ndarray:
+        a = elements.a
+        e = elements.e
+        i = elements.i
+        w = elements.w
+        Omega = elements.Omega
+        E = elements.E
+
+        Matrix = OrbitTrasformations.Matrix_trasformation(i, w, Omega)
+        ot = OrbitTrasformations()
+        v_ra = ot.nu(a)/(2*ot.r(a, e, E)*a)
+
+        partial_a_xyz = Matrix@np.array([np.cos(E) - e, ot.sqrt_e(e)*np.sin(E), 0])
+        partial_a_vxvyvz = v_ra * Matrix@np.array([np.sin(E), np.cos(E), 0])
+
+        return np.concatenate((partial_a_xyz, partial_a_vxvyvz))
+
+    @staticmethod
+    def partial_e(elements: OrbitalElements) -> np.ndarray:
+        a = elements.a
+        e = elements.e
+        i = elements.i
+        w = elements.w
+        Omega = elements.Omega
+        E = elements.E
+
+        Matrix = OrbitTrasformations.Matrix_trasformation(i, w, Omega)
+        ot = OrbitTrasformations()
+        aE = a*np.sin(E)
+
+        a_x = a*np.sin(E)/ot.r(a, e, E) + 1
+        a_y = e/ot.sqrt_e(e) - a*ot.sqrt_e(e)*np.cos(E)/ot.r(a, e, E)
+        a_z = 0
+
+        a_vx = ot.nu(a)*a*np.sin(E)/(ot.r(a, e, E)**2) * (2*np.cos(E) - a*e*np.sin(E)**2/ot.r(a, e, E))
+        a_vy = -ot.nu(a)*e*np.cos(E)/(ot.r(a, e, E)*ot.sqrt_e(e)) + ot.nu(a)*a*ot.sqrt_e(e)/(ot.r(a, e, E)**2) * (1 - 2*np.sin(E)**2 - a*e*np.cos(E)*np.sin(E)**2/ot.r(a, e, E))
+        a_vz = 0
+
+        partial_e_xyz = aE * Matrix@np.array([a_x, a_y, a_z])
+        partial_e_vxvyvz = Matrix@np.array([a_vx, a_vy, a_vz])
+
+        return np.concatenate((partial_e_xyz, partial_e_vxvyvz))
+
+    @staticmethod
+    def partial_i(elements: OrbitalElements) -> np.ndarray:
+        Omega = elements.Omega
+
+        state_vector = OrbitTrasformations.state_vector(elements)
+
+        partial_i_xyz = np.array([state_vector[2]*np.sin(Omega), -state_vector[2]*np.cos(Omega), -state_vector[0]*np.sin(Omega) + state_vector[1]*np.cos(Omega)])
+        partial_i_vxvyvz = np.array([state_vector[5]*np.sin(Omega), -state_vector[5]*np.cos(Omega), -state_vector[4]*np.sin(Omega) + state_vector[3]*np.cos(Omega)])
+
+        return np.concatenate((partial_i_xyz, partial_i_vxvyvz))
+
+    @staticmethod
+    def partial_Omega(elements: OrbitalElements) -> np.ndarray:
+        Omega = elements.Omega
+
+        state_vector = OrbitTrasformations.state_vector(elements)
+
+        partial_Omega_xyz = np.array([-state_vector[1]*np.sin(Omega), -state_vector[0]*np.cos(Omega), 0])
+        partial_Omega_vxvyvz = np.array([-state_vector[4]*np.sin(Omega), state_vector[3]*np.cos(Omega), 0])
+
+        return np.concatenate((partial_Omega_xyz, partial_Omega_vxvyvz))
+
+    @staticmethod
+    def partial_w(elements: OrbitalElements) -> np.ndarray:
+        i = elements.i
+        Omega = elements.Omega
+
+        state_vector = OrbitTrasformations.state_vector(elements)
+
+        w_x = -state_vector[1]*np.cos(i) - state_vector[2]*np.sin(i)*np.cos(Omega)*np.sin(Omega)
+        w_y = state_vector[0]*np.sin(i) - state_vector[2]*np.sin(i)*np.sin(Omega)
+        w_z = state_vector[0]*np.sin(i)*np.cos(Omega) + state_vector[1]*np.sin(i)*np.sin(Omega)
+
+        w_vx = -state_vector[4]*np.cos(i) - state_vector[5]*np.sin(i)*np.cos(Omega)
+        w_vy = state_vector[3]*np.cos(i) - state_vector[5]*np.sin(i)*np.sin(Omega)
+        w_vz = state_vector[3]*np.sin(i)*np.cos(Omega) + state_vector[4]*np.sin(i)*np.sin(Omega)
+
+        partial_w_xyz = np.array([w_x, w_y, w_z])
+        partial_w_vxvyvz = np.array([w_vx, w_vy, w_vz])
+
+        return np.concatenate((partial_w_xyz, partial_w_vxvyvz))
+
     
-    return np.array([vx, vy, vz])
+    @staticmethod
+    def partial_M(elements: OrbitalElements) -> np.ndarray:
+        a = elements.a
+        e = elements.e
+        i = elements.i
+        w = elements.w
+        Omega = elements.Omega
+        E = elements.E
 
-def get_state_vector(a, e, i, w, Omega, E):
+        state_vector = OrbitTrasformations.state_vector(elements)
+        n = (mu/a**3)**0.5
+        factor = -(mu*a**3)**0.5/OrbitTrasformations.r(a,e,E)**3
 
-    position = get_position_vector(a, e, i, w, Omega, E)
-    velocity = get_velocity_vector(a, e, i, w, Omega, E)
+        partial_M_xyz = (1/n) * np.array([state_vector[3]*np.sin(Omega), state_vector[4]*np.cos(Omega), state_vector[5]])
+        partial_M_vxvyvz = factor * np.array([state_vector[0], state_vector[1], state_vector[2]])
 
-    return np.concatenate((position, velocity))
+        return np.concatenate((partial_M_xyz, partial_M_vxvyvz)) 
 
-def get_derived_velocity_vector(a, e, i, w, Omega, E):
 
-    nu = nu(a)
-    r = r(a, e, E)
-
-    function = compute_function(i, w, Omega, which={'A', 'B', 'C', 'D', 'F', 'G'})  
-    vx = -(nu/r)*np.sin(E)*function['A'] - (nu/r)*(1-e**2)**0.5*np.cos(E)*function['B']
-    vy = -(nu/r)*np.sin(E)*function['C'] - (nu/r)*(1-e**2)**0.5*np.cos(E)*function['D']
-    vz = -(nu/r)*np.sin(E)*function['F'] + (nu/r)*(1-e**2)**0.5*np.cos(E)*function['G']
-    
-    return np.array([vx, vy, vz])
-
-def compute_derivatives(i, w, Omega, respect_to=None, which=None):
-    try:
-        results = {}
-        if respect_to == 'i':
-            if which is None or 'A' in which:
-                results['A'] = np.sin(i)*np.sin(Omega)*np.sin(w)
-            if which is None or 'B' in which:
-                results['B'] = -np.sin(i)*np.sin(Omega)*np.cos(w)
-            if which is None or 'C' in which:
-                results['C'] = -np.sin(i)*np.cos(Omega)*np.sin(w)
-            if which is None or 'D' in which:
-                results['D'] = -np.sin(i)*np.cos(Omega)*np.cos(w)
-            if which is None or 'F' in which:
-                results['F'] = np.sin(w)*np.cos(i)
-            if which is None or 'G' in which:
-                results['G'] = np.cos(w)*np.cos(i)
+    @staticmethod
+    def Jacobian(elements: OrbitalElements) -> np.ndarray:
+        """Compute the complete Jacobian matrix"""
+        jacobian = np.zeros((6, 6))
         
-        elif respect_to == 'w':
-            if which is None or 'A' in which:
-                results['A'] = -np.cos(Omega)*np.sin(w) - np.cos(i)*np.cos(Omega)*np.cos(w)
-            if which is None or 'B' in which:
-                results['B'] = np.sin(Omega)*np.cos(w) - np.cos(i)*np.sin(Omega)*np.sin(w)
-            if which is None or 'C' in which:
-                results['C'] = -np.sin(Omega)*np.sin(w) + np.cos(i)*np.cos(Omega)*np.cos(w)
-            if which is None or 'D' in which:
-                results['D'] = np.sin(Omega)*np.sin(w) + np.cos(i)*np.cos(Omega)*np.sin(w)
-            if which is None or 'F' in which:
-                results['F'] = np.cos(w)*np.sin(i)
-            if which is None or 'G' in which:
-                results['G'] = -np.sin(w)*np.sin(i)
+        jacobian[:, 0] = JaccobianComponents.partial_a(elements)
+        jacobian[:, 1] = JaccobianComponents.partial_e(elements)
+        jacobian[:, 2] = JaccobianComponents.partial_i(elements)
+        jacobian[:, 3] = JaccobianComponents.partial_w(elements)
+        jacobian[:, 4] = JaccobianComponents.partial_Omega(elements)
+        jacobian[:, 5] = JaccobianComponents.partial_M(elements)
         
-        elif respect_to == 'Omega':
-            if which is None or 'A' in which:
-                results['A'] = -np.sin(Omega)*np.cos(w) - np.cos(i)*np.cos(Omega)*np.sin(w)
-            if which is None or 'B' in which:
-                results['B'] = -np.sin(Omega)*np.sin(w) + np.cos(i)*np.cos(Omega)*np.cos(w)
-            if which is None or 'C' in which:
-                results['C'] = np.cos(Omega)*np.cos(w) - np.cos(i)*np.sin(Omega)*np.sin(w)
-            if which is None or 'D' in which:
-                results['D'] = np.cos(Omega)*np.sin(w) + np.cos(i)*np.sin(Omega)*np.cos(w)
-            if which is None or 'F' in which:
-                results['F'] = 0
-            if which is None or 'G' in which:
-                results['G'] = 0
-        else:
-            print('Error in compute_derivatives: respect_to is not valid')
+        return jacobian
 
-    except Exception as e:
-        print('Error in compute_derivatives: ', e)
-    
-    return results
+    @staticmethod
+    def Jacobian_inv(elements: OrbitalElements) -> np.ndarray:
+        return np.linalg.inv(JaccobianComponents.Jacobian(elements))
 
-#----------------Derivates respecto to a----------------
-
-def partial_aX(e, i, w, Omega, E):
-    function = compute_function(i, w, Omega, which={'A', 'B'}) 
-    return (np.cos(E) - e)*function['A'] - sqrt_e(e)*np.sin(E)*function['B']
-
-def partial_aY(e, i, w, Omega, E):
-    function = compute_function(i, w, Omega, which={'C', 'D'})
-    return (np.cos(E) - e)*function['C'] - sqrt_e(e)*np.sin(E)*function['D']
-
-def partial_aZ(e, i, w, Omega, E):
-    function = compute_function(i, w, Omega, which={'F', 'G'}) 
-    return (np.cos(E) - e)*function['F'] + sqrt_e(e)*np.sin(E)*function['G']
-
-def partial_aVx(a, e, i, w, Omega, E):
-    function = compute_function(i, w, Omega, which={'A', 'B'})
-    return nu(a)/(2*r(a, e, E))*np.sin(E)*function['A'] + nu(a)/(2*r(a, e, E))*sqrt_e(e)*np.cos(E)*function['B']
-
-def partial_aVy(a, e, i, w, Omega, E):
-    function = compute_function(i, w, Omega, which={'C', 'D'})
-    return nu(a)/(2*r(a, e, E))*np.sin(E)*function['C'] + nu(a)/(2*r(a, e, E))*sqrt_e(e)*np.cos(E)*function['D']
-
-def partial_aVz(a, e, i, w, Omega, E):
-    function = compute_function(i, w, Omega, which={'F', 'G'})
-    return nu(a)/(2*r(a, e, E))*np.sin(E)*function['F'] - nu(a)/(2*r(a, e, E))*sqrt_e(e)*np.cos(E)*function['G']
-
-
-#----------------Derivates respecto e----------------
-
-def partial_eX(a, e, i, w, Omega, E):
-    a_r = a/r(a, e, E)
-    function = compute_function(i, w, Omega, which={'A', 'B'})
-    return -a*(a_r*np.sin(E)**2 + 1)*function['A'] + a*np.sin(E)*(e/sqrt_e(e) - a_r*sqrt_e(e)*np.cos(E))*function['B']
-
-def partial_eY(a, e, i, w, Omega, E):
-    a_r = a/r(a, e, E)
-    function = compute_function(i, w, Omega, which={'C', 'D'})
-    return -a*(a_r*np.sin(E)**2 + 1)*function['C'] + a*np.sin(E)*(e/sqrt_e(e) - a_r*sqrt_e(e)*np.cos(E))*function['D']
-
-def partial_eZ(a, e, i, w, Omega, E):
-    a_r = a/r(a, e, E)
-    function = compute_function(i, w, Omega, which={'F', 'G'})
-    return -a*(a_r*np.sin(E)**2 + 1)*function['F'] - a*np.sin(E)*(e/sqrt_e(e) - a_r*sqrt_e(e)*np.cos(E))*function['G']
-
-def partial_eVx(a, e, i, w, Omega, E):
-    a_r = a/r(a, e, E)
-    nua_r = (nu(a)*a)/r(a, e, E)**2
-    nue_r = nu(a)*e/r(a, e, E)
-
-    function = compute_function(i, w, Omega, which={'A', 'B'})
-
-    term1 = -nua_r*np.sin(E)*(2*np.cos(E) - a_r*e*np.sin(E)**2)*function['A'] 
-    term2 = -(nue_r*(1/sqrt_e(e))*np.cos(E) - nua_r*sqrt_e(e)*(1 - 2*np.sin(E)**2 - a_r*e*np.sin(E)**2*np.cos(E)))*function['B']
-
-    return term1 + term2
-
-def partial_eVy(a, e, i, w, Omega, E):
-    a_r = a/r(a, e, E)
-    nua_r = (nu(a)*a)/r(a, e, E)**2
-    nue_r = nu(a)*e/r(a, e, E)
-
-    function = compute_function(i, w, Omega, which={'C', 'D'})
-
-    term1 = - nua_r*np.sin(E)*(2*np.cos(E) - a_r*e*np.sin(E)**2)*function['C'] 
-    term2 = - (nue_r*(1/sqrt_e(e))*np.cos(E) - nua_r*sqrt_e(e)*(1 - 2*np.sin(E)**2 - a_r*e*np.sin(E)**2*np.cos(E)))*function['D']
-
-    return term1 + term2
-
-def partial_eVz(a, e, i, w, Omega, E):
-    a_r = a/r(a, e, E)
-    nua_r = (nu(a)*a)/r(a, e, E)**2
-    nue_r = nu(a)*e/r(a, e, E)
-
-    function = compute_function(i, w, Omega, which={'F', 'G'})
-
-    term1 = - nua_r*np.sin(E)*(2*np.cos(E) - a_r*e*np.sin(E)**2)*function['F'] 
-    term2 = - (nue_r*(1/sqrt_e(e))*np.cos(E) - nua_r*sqrt_e(e)*(1 - 2*np.sin(E)**2 - a_r*e*np.sin(E)**2*np.cos(E)))*function['G']
-
-    return term1 + term2
-
-
-#----------------Derivates respecto i----------------
-
-def partial_iX(a, e, i, w, Omega, E):
-    partial_i = compute_derivatives(i, w, Omega, respect_to='i', which={'A', 'B'})
-    return a*(np.cos(E) - e)*partial_i['A'] - a*sqrt_e(e)*np.sin(E)*partial_i['B']
-
-def partial_iY(a, e, i, w, Omega, E):
-    partial_i = compute_derivatives(i, w, Omega, respect_to='i', which={'C', 'D'})
-    return a*(np.cos(E) - e)*partial_i['C'] - a*sqrt_e(e)*np.sin(E)*partial_i['D']
-
-def partial_iZ(a, e, i, w, Omega, E):
-    partial_i = compute_derivatives(i, w, Omega, respect_to='i', which={'F', 'G'})
-    return a*(np.cos(E) - e)*partial_i['F'] + a*sqrt_e(e)*np.sin(E)*partial_i['G']
-
-def partial_iVx(a, e, i, w, Omega, E):
-    partial_i = compute_derivatives(i, w, Omega, respect_to='i', which={'A', 'B'})
-    nu_r = nu(a)/r(a, e, E)
-    return -nu_r*np.sin(E)*partial_i['A'] - nu_r*sqrt_e(e)*np.cos(E)*partial_i['B']
-
-def partial_iVy(a, e, i, w, Omega, E):
-    partial_i = compute_derivatives(i, w, Omega, respect_to='i', which={'C', 'D'})
-    nu_r = nu(a)/r(a, e, E)
-    return -nu_r*np.sin(E)*partial_i['C'] - nu_r*sqrt_e(e)*np.cos(E)*partial_i['D']
-
-def partial_iVz(a, e, i, w, Omega, E):
-    partial_i = compute_derivatives(i, w, Omega, respect_to='i', which={'F', 'G'})
-    nu_r = nu(a)/r(a, e, E)
-    return -nu_r*np.sin(E)*partial_i['F'] + nu_r*sqrt_e(e)*np.cos(E)*partial_i['G']
-
-
-#----------------Derivates respecto w----------------
-
-def partial_wX(a, e, i, w, Omega, E):
-    partial_w = compute_derivatives(i, w, Omega, respect_to='w', which={'A', 'B'})
-    return a*(np.cos(E) - e)*partial_w['A'] - a*sqrt_e(e)*np.sin(E)*partial_w['B']
-
-def partial_wY(a, e, i, w, Omega, E):
-    partial_w = compute_derivatives(i, w, Omega, respect_to='w', which={'C', 'D'})
-    return a*(np.cos(E) - e)*partial_w['C'] - a*sqrt_e(e)*np.sin(E)*partial_w['D']
-
-def partial_wZ(a, e, i, w, Omega, E):
-    partial_w = compute_derivatives(i, w, Omega, respect_to='w', which={'F', 'G'})
-    return a*(np.cos(E) - e)*partial_w['F'] + a*sqrt_e(e)*np.sin(E)*partial_w['G']
-
-def partial_wVx(a, e, i, w, Omega, E):
-    partial_w = compute_derivatives(i, w, Omega, respect_to='w', which={'A', 'B'})
-    nu_r = nu(a)/r(a, e, E)
-    return -nu_r*np.sin(E)*partial_w['A'] - nu_r*sqrt_e(e)*np.cos(E)*partial_w['B']
-
-def partial_wVy(a, e, i, w, Omega, E):
-    partial_w = compute_derivatives(i, w, Omega, respect_to='w', which={'C', 'D'})
-    nu_r = nu(a)/r(a, e, E)
-    return -nu_r*np.sin(E)*partial_w['C'] - nu_r*sqrt_e(e)*np.cos(E)*partial_w['D']
-
-def partial_wVz(a, e, i, w, Omega, E):
-    partial_w = compute_derivatives(i, w, Omega, respect_to='w', which={'F', 'G'})
-    nu_r = nu(a)/r(a, e, E)
-    return -nu_r*np.sin(E)*partial_w['F'] + nu_r*sqrt_e(e)*np.cos(E)*partial_w['G']
-
-
-#----------------Derivates respecto Omega----------------
-
-def partial_OmegaX(a, e, i, w, Omega, E):
-    partial_Omega = compute_derivatives(i, w, Omega, respect_to='Omega', which={'A', 'B'})
-    return a*(np.cos(E) - e)*partial_Omega['A'] - a*sqrt_e(e)*np.sin(E)*partial_Omega['B']
-
-def partial_OmegaY(a, e, i, w, Omega, E):
-    partial_Omega = compute_derivatives(i, w, Omega, respect_to='Omega', which={'C', 'D'})
-    return a*(np.cos(E) - e)*partial_Omega['C'] - a*sqrt_e(e)*np.sin(E)*partial_Omega['D']
-
-def partial_OmegaZ(a, e, i, w, Omega, E):
-    partial_Omega = compute_derivatives(i, w, Omega, respect_to='Omega', which={'F', 'G'})
-    return a*(np.cos(E) - e)*partial_Omega['F'] + a*sqrt_e(e)*np.sin(E)*partial_Omega['G']
-
-def partial_OmegaVx(a, e, i, w, Omega, E):
-    partial_Omega = compute_derivatives(i, w, Omega, respect_to='Omega', which={'A', 'B'})
-    nu_r = nu(a)/r(a, e, E)
-    return -nu_r*np.sin(E)*partial_Omega['A'] - nu_r*sqrt_e(e)*np.cos(E)*partial_Omega['B']
-
-def partial_OmegaVy(a, e, i, w, Omega, E):
-    partial_Omega = compute_derivatives(i, w, Omega, respect_to='Omega', which={'C', 'D'})
-    nu_r = nu(a)/r(a, e, E)
-    return -nu_r*np.sin(E)*partial_Omega['C'] - nu_r*sqrt_e(e)*np.cos(E)*partial_Omega['D']
-
-def partial_OmegaVz(a, e, i, w, Omega, E):
-    partial_Omega = compute_derivatives(i, w, Omega, respect_to='Omega', which={'F', 'G'})
-    nu_r = nu(a)/r(a, e, E)
-    return -nu_r*np.sin(E)*partial_Omega['F'] + nu_r*sqrt_e(e)*np.cos(E)*partial_Omega['G']
-
-
-#----------------Derivates respecto Mean Anomaly----------------
-
-def partial_MX(a, e, i, w, Omega, E):
-    a_r = a**2/r(a, e, E)
-    function = compute_function(i, w, Omega, which={'A', 'B'}) 
-    return -a_r*np.sin(E)*function['A'] - a_r*sqrt_e(e)*np.cos(E)*function['B']
-
-def partial_MY(a, e, i, w, Omega, E):
-    a_r = a**2/r(a, e, E)
-    function = compute_function(i, w, Omega, which={'C', 'D'}) 
-    return -a_r*np.sin(E)*function['C'] + a_r*sqrt_e(e)*np.cos(E)*function['D']
-
-def partial_MZ(a, e, i, w, Omega, E):
-    a_r = a**2/r(a, e, E)
-    function = compute_function(i, w, Omega, which={'F', 'G'}) 
-    return -a_r*np.sin(E)*function['F'] + a_r*sqrt_e(e)*np.cos(E)*function['G']
-
-def partial_MVx(a, e, i, w, Omega, E):
-    a_r = a/(r(a, e, E)**2)
-    ae_r = (a*e)/r(a, e, E)
-    function = compute_function(i, w, Omega, which={'A', 'B'})
-    return a_r*(ae_r*np.sin(E)**2 + nu(a)*np.cos(E))*function['A'] + a_r*sqrt_e(e)*(a*e*np.sin(E)*np.cos(E) + nu(a)*np.sin(E))*function['B']
-
-def partial_MVy(a, e, i, w, Omega, E):
-    a_r = a/(r(a, e, E)**2)
-    ae_r = (a*e)/r(a, e, E)
-    function = compute_function(i, w, Omega, which={'C', 'D'})
-    return a_r*(ae_r*np.sin(E)**2 + nu(a)*np.cos(E))*function['C'] + a_r*sqrt_e(e)*(a*e*np.sin(E)*np.cos(E) + nu(a)*np.sin(E))*function['D']
-
-def partial_MVz(a, e, i, w, Omega, E):
-    a_r = a/(r(a, e, E)**2)
-    ae_r = (a*e)/r(a, e, E)
-    function = compute_function(i, w, Omega, which={'F', 'G'})
-    return a_r*(ae_r*np.sin(E)**2 + nu(a)*np.cos(E))*function['F'] - a_r*sqrt_e(e)*(a*e*np.sin(E)*np.cos(E) + nu(a)*np.sin(E))*function['G']
-
-
-#----------------Jaccobian----------------
-
-def Jacobian_xE(a, e, i, w, Omega, E):
-    """
-    Constructs the Jacobian matrix for the transformation between orbital elements
-    and Cartesian state vector.
-    
-    Parameters:
-    a, e, i, w, Omega: Orbital elements (semi-major axis, eccentricity,
-                       inclination, argument of periapsis, longitude of ascending node)
-    E: Eccentric anomaly
-    
-    Returns:
-    jacobian: 6×6 numpy array representing the Jacobian matrix where
-              rows = [x, y, z, vx, vy, vz]
-              columns = [a, e, i, w, Omega, M]
-    """
-    jacobian = np.zeros((6, 6))
-    
-    # First row: Partial derivatives of x with respect to orbital elements
-    jacobian[0, 0] = partial_aX(e, i, w, Omega, E)
-    jacobian[0, 1] = partial_eX(a, e, i, w, Omega, E)
-    jacobian[0, 2] = partial_iX(a, e, i, w, Omega, E)
-    jacobian[0, 3] = partial_OmegaX(a, e, i, w, Omega, E)
-    jacobian[0, 4] = partial_wX(a, e, i, w, Omega, E)
-    jacobian[0, 5] = partial_MX(a, e, i, w, Omega, E)
-    
-    # Second row: Partial derivatives of y with respect to orbital elements
-    jacobian[1, 0] = partial_aY(e, i, w, Omega, E)
-    jacobian[1, 1] = partial_eY(a, e, i, w, Omega, E)
-    jacobian[1, 2] = partial_iY(a, e, i, w, Omega, E)
-    jacobian[1, 3] = partial_OmegaY(a, e, i, w, Omega, E)
-    jacobian[1, 4] = partial_wY(a, e, i, w, Omega, E)
-    jacobian[1, 5] = partial_MY(a, e, i, w, Omega, E)
-    
-    # Third row: Partial derivatives of z with respect to orbital elements
-    jacobian[2, 0] = partial_aZ(e, i, w, Omega, E)
-    jacobian[2, 1] = partial_eZ(a, e, i, w, Omega, E)
-    jacobian[2, 2] = partial_iZ(a, e, i, w, Omega, E)
-    jacobian[2, 3] = partial_OmegaZ(a, e, i, w, Omega, E)
-    jacobian[2, 4] = partial_wZ(a, e, i, w, Omega, E)
-    jacobian[2, 5] = partial_MZ(a, e, i, w, Omega, E)
-    
-    # Fourth row: Partial derivatives of vx with respect to orbital elements
-    jacobian[3, 0] = partial_aVx(a, e, i, w, Omega, E)
-    jacobian[3, 1] = partial_eVx(a, e, i, w, Omega, E)
-    jacobian[3, 2] = partial_iVx(a, e, i, w, Omega, E)
-    jacobian[3, 3] = partial_OmegaVx(a, e, i, w, Omega, E)
-    jacobian[3, 4] = partial_wVx(a, e, i, w, Omega, E)
-    jacobian[3, 5] = partial_MVx(a, e, i, w, Omega, E)
-    
-    # Fifth row: Partial derivatives of vy with respect to orbital elements
-    jacobian[4, 0] = partial_aVy(a, e, i, w, Omega, E)
-    jacobian[4, 1] = partial_eVy(a, e, i, w, Omega, E)
-    jacobian[4, 2] = partial_iVy(a, e, i, w, Omega, E)
-    jacobian[4, 3] = partial_OmegaVy(a, e, i, w, Omega, E)
-    jacobian[4, 4] = partial_wVy(a, e, i, w, Omega, E)
-    jacobian[4, 5] = partial_MVy(a, e, i, w, Omega, E)
-    
-    # Sixth row: Partial derivatives of vz with respect to orbital elements
-    jacobian[5, 0] = partial_aVz(a, e, i, w, Omega, E)
-    jacobian[5, 1] = partial_eVz(a, e, i, w, Omega, E)
-    jacobian[5, 2] = partial_iVz(a, e, i, w, Omega, E)
-    jacobian[5, 3] = partial_OmegaVz(a, e, i, w, Omega, E)
-    jacobian[5, 4] = partial_wVz(a, e, i, w, Omega, E)
-    jacobian[5, 5] = partial_MVz(a, e, i, w, Omega, E)
-    
-    return jacobian
-
-
-def Jacobian_Ex(a, e, i, w, Omega, E):
-    return np.linalg.inv(Jacobian_xE(a, e, i, w, Omega, E))
