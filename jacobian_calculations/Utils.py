@@ -577,7 +577,7 @@ def calcKeplerianJacobians(mu,celements,state):
     Je2c[0,1]=q/(1-e)**2
     JX2c=np.matmul(JX2e,Je2c)
 
-    return JX2c, JX2e
+    return JX2e, cosE
 
 def X2E(X,mu):
     elts=spy.oscelt(X,0,mu)
