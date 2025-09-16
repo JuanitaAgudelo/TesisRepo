@@ -48,7 +48,7 @@ def trasformation_xyvxvy_to_aewE(x: float, y: float, vx: float, vy: float, mu: f
 
 
 # Define center and widths of the phase-space hypercube
-N = int(1e7)
+N = int(1e8)
 
 c_x = 1
 c_y = 0
@@ -94,7 +94,7 @@ for i in range(iterations):
     objects = objsx & objsy & objsvx & objsvy
     N_numeric = objects.sum()
 
-    list_count_objects.append({"transformation_type": "uniform_aewM", "numerical_count": N_numeric, "theoretical_count": 117.758252, "objects_generated": N})
+    list_count_objects.append({"transformation_type": "uniform_aewM", "numerical_count": N_numeric, "theoretical_count": 117758.25215646437, "objects_generated": N})
 
 df = pd.concat([df_count_objects, pd.DataFrame(list_count_objects)], ignore_index=True)
 
