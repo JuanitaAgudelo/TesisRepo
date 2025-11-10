@@ -1485,6 +1485,7 @@ class FitCMND():
         self.cmnd._ignoreWarnings=self._ignoreWarnings
         self.minargs=dict(method="Powell")
         self.minargs.update(args)
+        print(self.minparams)
         self.solution=minimize(self.cmnd.sampleCMNDLikelihood,
                                self.minparams,
                                callback=_advance,
