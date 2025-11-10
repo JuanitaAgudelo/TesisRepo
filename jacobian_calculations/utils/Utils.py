@@ -749,8 +749,13 @@ def compute_jacobian_XoE(a: float, e: float, i: float, Omega: float, w: float, M
     J[:,3] = partial_Omega
     J[:,4] = partial_w
     J[:,5] = partial_M
+
+    Je2c=np.eye(6)
+    Je2c[0,0]=1/(1-e)
+    Je2c[0,1]=q/(1-e)**2
+    JX2c=np.matmul(J,Je2c)
     
-    return J
+    return JX2c
 
 
 def trasformation_E_to_X(a: float, e: float, i: float, Omega: float, w: float, M: float, mu: float) -> tuple[float, float, float, float, float, float]:

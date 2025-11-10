@@ -196,9 +196,11 @@ def test_random_variation():
     
 
 def test_random_variation_optimize():
+    print("runing test_random_variation_optimize")
 
     # Define center and widths of the phase-space hypercube
     N = int(1e8)
+    print("N = 1e8")
 
     c_x = 1
     c_y = 0
@@ -212,7 +214,8 @@ def test_random_variation_optimize():
 
     center = (c_x, c_y, c_z, v_x, v_y, v_z)
     widths = (dxyz, dxyz, dxyz, dvxyz, dvxyz, dvxyz)
-
+    
+    print("Computing P_X integral")
     N_theoretical = surface_integral_P_X_sini(center, widths, n_points=8, mu=mu)
 
     iterations = 20
