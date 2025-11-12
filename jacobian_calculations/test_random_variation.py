@@ -8,6 +8,7 @@ import pandas as pd
 from typing import Set, Dict
 import scipy.optimize as optimize
 sys.path.append(str(Path().resolve().parent))
+import multimin as mm
 from utils.Utils import (
     compute_functions, 
     compute_state_vector, 
@@ -123,84 +124,137 @@ def surface_integral_P_X_sini(center, widths, n_points=8, mu=1):
     #return integral, y_points
     return integral
 
+def Jacobian_qei_to_QEI(q: float, e: float, i: float, q_max: float, e_max: float, i_max: float) -> np.array:
+    partialA_a = q_max/(q*(q_max - q))
+    partialA_e = 0
+    partialA_i = 0
+    partialE_a = 0
+    partialE_e = e_max/(e*(e_max - e))
+    partialE_i = 0
+    partialI_a = 0
+    partialI_e = 0
+    partialI_i = i_max/(i*(i_max - i))
 
-def test_random_variation():
-    #define amount of objects to generate
-    N = int(1e8)
+    Jacobian = np.array([[partialA_a, partialA_e, partialA_i], [partialE_a, partialE_e, partialE_i], [partialI_a, partialI_e, partialI_i]])
+    return Jacobian
+
+def P_E_CMND(a: float, e: float, i: float, F: mm.FitCMND) -> float:
+    max = 2*np.pi; min = 0
+
+    q = a*(1-e)
+    element = np.array([q, e, i])
+    scales=[1.35,1.00,np.pi]
+    u_element = mm.Util.tIF(element, scales, mm.Util.f2u)
+
+    P_qei = F.cmnd.pdf(u_element)
+    P_WwM = 1/(max - min)**3
+
+    return P_qei * P_WwM
+
+def P_X_CMND(x: np.array, y: np.array, z: np.array, vx: np.array, vy: np.array, vz: np.array, q_max: float, e_max: float, i_max: float, mu: float, F: mm.FitCMND) -> np.array:
+    """
+    Vectorized version: x, y, vx, vy are arrays (or scalars).
+    Returns array of P values.
+    """
+    x = np.asarray(x)
+    y = np.asarray(y)
+    z = np.asarray(z)
+    vx = np.asarray(vx)
+    vy = np.asarray(vy)
+    vz = np.asarray(vz)
+    # Prepare output array
+    shape = np.broadcast(x, y, z, vx, vy, vz).shape
+    P = np.empty(shape, dtype=float)
+
+    # Flatten for iteration if needed
+    x_flat = x.ravel()
+    y_flat = y.ravel()
+    z_flat = z.ravel()
+    vx_flat = vx.ravel()
+    vy_flat = vy.ravel()
+    vz_flat = vz.ravel()
+
+    for idx in range(x_flat.size):
+        a, e, i, Omega, w, M = trasformation_X_to_E(x_flat[idx], y_flat[idx], z_flat[idx], vx_flat[idx], vy_flat[idx], vz_flat[idx], mu)
+        q = a*(1-e)
+        J = compute_jacobian_XoE(a,e,i,Omega,w,M,mu)
+        J_qei_to_QEI = Jacobian_qei_to_QEI(q,e,i,q_max,e_max,i_max)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            det = np.linalg.det(J)
+            det_QEI = np.linalg.det(J_qei_to_QEI)
+            #print(x_flat[idx], y_flat[idx], z_flat[idx],  vx_flat[idx], vy_flat[idx], vz_flat[idx])
+            #print(det)
+            if det == 0 or not np.isfinite(det):
+                print("Problematic point: ", x_flat[idx], y_flat[idx], z_flat[idx], vx_flat[idx], vy_flat[idx], vz_flat[idx])
+                P.flat[idx] = np.nan
+            else:
+                inv_det = 1.0/det 
+                #print(P_E_CMND(a, e, i, F) * abs(inv_det) * abs(det_AEI)) 
+                P.flat[idx] = P_E_CMND(a, e, i, F) * abs(inv_det) * abs(det_QEI)
+                
+    return P.reshape(shape)
     
-    #define the center and widths of the phase-space hypercube
-    c_x = 1
-    c_y = 0
-    c_z = 0
-    v_x = 0
-    v_y = (mu/1)**0.5
-    v_z = 0
+def surface_integral_P_X_CMND(center, widths, max_elements: list, n_points=8, mu=1, F=mm.FitCMND):
+    """
+    Calculate the surface integral of P_xyvxvy in a hypercube centered at (x, y, vx, vy)
+    with dimensions (dx, dy, dvx, dvy) using Gauss-Legendre quadrature.
 
-    dxyz = 0.2
-    dvxyz = 5000 * (1/AU_m) * year 
+    Parameters:
+        center: tuple/list/array of (x, y, vx, vy) center
+        widths: tuple/list/array of (dx, dy, dvx, dvy) side lengths
+        max_elemetns: tuple/list/array of (a_max, e_max, i_max) max elements
+        n_points: number of quadrature points per dimension
 
-    center = (c_x, c_y, c_z, v_x, v_y, v_z)
-    widths = (dxyz, dxyz, dxyz, dvxyz, dvxyz, dvxyz)
+    Returns:
+        Integral (float)
+    """
+    from numpy.polynomial.legendre import leggauss
 
-    N_theoretical = surface_integral_P_X_sini(center, widths, n_points=8, mu=mu)
+    x0, y0, z0, vx0, vy0, vz0 = center
+    dx, dy, dz, dvx, dvy, dvz = widths
+    q_max, e_max, i_max = max_elements
 
-    iterations = 20
-    #df_count_objects = pd.DataFrame(columns=["transformation_type", "numerical_count", "theoretical_count", "objects_generated"])
-    df_count_objects = pd.read_csv("count_objects2.csv")
-    list_count_objects = []
+    # Get Gauss-Legendre points and weights for [-1, 1]
+    pts, wts = leggauss(n_points)
 
-    for iter in range(iterations):
-        print(f"Iteration {iter}")
-        a_uniform = np.random.uniform(0, 2, N)
-        e_uniform = np.random.uniform(0, 1, N)
-        
-        #maping i as sin(i)
-        u = np.random.uniform(0,1,N)
-        mask = u <= 0.5
-        I1 = np.arcsin(2*u[mask])
-        I2 = np.pi - np.arcsin(2*(1-u[~mask]))
-        I = np.concatenate([I1, I2])
+    # Map points from [-1, 1] to [center-width/2, center+width/2] for each dimension
+    x_pts = x0 + 0.5*dx*pts
+    y_pts = y0 + 0.5*dy*pts
+    z_pts = z0 + 0.5*dz*pts
+    vx_pts = vx0 + 0.5*dvx*pts
+    vy_pts = vy0 + 0.5*dvy*pts
+    vz_pts = vz0 + 0.5*dvz*pts
 
-        Omega_uniform = np.random.uniform(0, 2*np.pi, N)
-        w_uniform = np.random.uniform(0, 2*np.pi, N)
-        M_uniform = np.random.uniform(0, 2*np.pi, N)
-        q_uniform = a_uniform*(1-e_uniform)
+    # Create meshgrid of all quadrature points
+    X, Y, Z, VX, VY, VZ = np.meshgrid(x_pts, y_pts, z_pts, vx_pts, vy_pts, vz_pts, indexing='ij')
+    WX, WY, WZ, WVX, WVY, WVZ = np.meshgrid(wts, wts, wts, wts, wts, wts, indexing='ij')
 
-        state_vectors = np.zeros((N, 6))
-        for el in tqdm(range(N)):
-            a = a_uniform[el]
-            e = e_uniform[el]
-            i = I[el]
-            Omega = Omega_uniform[el]
-            w = w_uniform[el]
-            M = M_uniform[el]
+    # Flatten for vectorized evaluation
+    Xf = X.ravel()
+    Yf = Y.ravel()
+    Zf = Z.ravel()
+    VXf = VX.ravel()
+    VYf = VY.ravel()
+    VZf = VZ.ravel()
+    WF = (WX * WY * WZ * WVX * WVY * WVZ).ravel()
+    # Evaluate P at all points
+    Pf = P_X_CMND(Xf, Yf, Zf, VXf, VYf, VZf, q_max, e_max, i_max, mu, F=F)
 
-            x, y, z, vx, vy, vz = trasformation_E_to_X(a, e, i, Omega, w, M, mu)
-            state_vectors[el] = np.array([x, y, z, vx, vy, vz])
-
-        # Numerical: count number of objects in the volume from the sample
-        objsx = (abs(state_vectors[:,0] - c_x) <= dxyz/2) 
-        objsy = (abs(state_vectors[:,1] - c_y) <= dxyz/2) 
-        objsz = (abs(state_vectors[:,2] - c_z) <= dxyz/2) 
-        objsvx = (abs(state_vectors[:,3] - v_x) <= dvxyz/2) 
-        objsvy = (abs(state_vectors[:,4] - v_y) <= dvxyz/2) 
-        objsvz = (abs(state_vectors[:,5] - v_z) <= dvxyz/2) 
-
-        objects = objsx & objsy & objsz & objsvx & objsvy & objsvz
-        N_numeric = objects.sum()
-
-        list_count_objects.append({"transformation_type": "uniform_complete_sini_2", "numerical_count": N_numeric, "theoretical_count": N_theoretical * N, "objects_generated": N, "iteration": iter})
-    
-    df = pd.concat([df_count_objects, pd.DataFrame(list_count_objects)])
-    df.to_csv("count_objects2.csv", index=False)
-    
+    # Integral is sum(P * weight) * volume factor
+    integral = np.sum(Pf * WF) * (0.5*dx) * (0.5*dy) * (0.5*dz) * (0.5*dvx) * (0.5*dvy) * (0.5*dvz)
+    #return integral, y_points
+    return integral
 
 def test_random_variation_optimize():
     print("runing test_random_variation_optimize")
 
     # Define center and widths of the phase-space hypercube
-    N = int(1e8)
-    print("N = 1e8")
+    N = int(1e7)
+    print("N = 1e7")
+
+    F = mm.FitCMND(f"../multimin/products/fit-NEAs-qei-Ng10-Nv3-rad.pkl")
+
+    max_elements = (1.3, 1.0, np.pi)
 
     c_x = 1
     c_y = 0
@@ -216,7 +270,7 @@ def test_random_variation_optimize():
     widths = (dxyz, dxyz, dxyz, dvxyz, dvxyz, dvxyz)
     
     print("Computing P_X integral")
-    N_theoretical = surface_integral_P_X_sini(center, widths, n_points=8, mu=mu)
+    N_theoretical = surface_integral_P_X_CMND(center, widths, max_elements=max_elements, n_points=8, mu=mu, F=F)
 
     iterations = 20
     #df_count_objects = pd.DataFrame(columns=["transformation_type", "numerical_count", "theoretical_count", "objects_generated"])
@@ -224,16 +278,20 @@ def test_random_variation_optimize():
     list_count_objects = []
 
     for iter in range(iterations):
-        print(f"Iteration {iter}")
-        a_uniform = np.random.uniform(0, 2, N)
-        e_uniform = np.random.uniform(0, 1, N)
-        
-        #maping i as sin(i)
-        u = np.random.uniform(0,1,N)
-        mask = u <= 0.5
-        I1 = np.arcsin(2*u[mask])
-        I2 = np.pi - np.arcsin(2*(1-u[~mask]))
-        I = np.concatenate([I1, I2])
+        print(f" ------------------------------ Iteration {iter} ------------------------------")
+
+        print("Generating sample from CMND distribution")
+        fit_sample = F.cmnd.rvs(Nsam=N)
+
+        scales=[1.35,1.00,np.pi]
+        print("Converting sample from CMND distribution to QEI distribution")
+        converted_sample = np.zeros_like(fit_sample)
+        for i, element in enumerate(fit_sample):
+            converted_sample[i] = mm.Util.tIF(element, scales, mm.Util.u2f)
+
+        q_CMND = converted_sample[:,0]
+        e_CMND = converted_sample[:,1]
+        i_CMND = converted_sample[:,2]
 
         Omega_uniform = np.random.uniform(0, 2*np.pi, N)
         w_uniform = np.random.uniform(0, 2*np.pi, N)
@@ -241,12 +299,14 @@ def test_random_variation_optimize():
         
         N_numeric = 0
         for el in tqdm(range(N)):
-            a = a_uniform[el]
-            e = e_uniform[el]
-            i = I[el]
+            print("Counting objects in the volume")
+            q = q_CMND[el]
+            e = e_CMND[el]
+            i = i_CMND[el]
             Omega = Omega_uniform[el]
             w = w_uniform[el]
             M = M_uniform[el]
+            a = q/(1-e)
 
             x, y, z, vx, vy, vz = trasformation_E_to_X(a, e, i, Omega, w, M, mu)
 
@@ -261,10 +321,13 @@ def test_random_variation_optimize():
             ):
                 N_numeric += 1
 
-        list_count_objects.append({"transformation_type": "uniform_complete_sini_2", "numerical_count": N_numeric, "theoretical_count": N_theoretical * N, "objects_generated": N, "iteration": iter})
-
+        print(f"Number of objects in the volume: {N_numeric}")
+        print(f"Ratio: {N_numeric / (N_theoretical * N)}")
+        list_count_objects.append({"transformation_type": "CMND_complete", "numerical_count": N_numeric, "theoretical_count": N_theoretical * N, "objects_generated": N, "iteration": iter})
+        
     df = pd.concat([df_count_objects, pd.DataFrame(list_count_objects)])
     df.to_csv("count_objects2.csv", index=False)
+    print("Results saved")
 
 
 def __init__():
