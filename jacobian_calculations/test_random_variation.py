@@ -249,8 +249,8 @@ def test_random_variation_optimize():
     print("runing test_random_variation_optimize")
 
     # Define center and widths of the phase-space hypercube
-    N = int(1e7)
-    print("N = 1e7")
+    N = int(1e8)
+    print("N = 1e8")
 
     F = mm.FitCMND(f"../multimin/products/fit-NEAs-qei-Ng10-Nv3-rad.pkl")
 
@@ -298,8 +298,8 @@ def test_random_variation_optimize():
         M_uniform = np.random.uniform(0, 2*np.pi, N)
         
         N_numeric = 0
+        print("Counting objects in the volume")
         for el in tqdm(range(N)):
-            print("Counting objects in the volume")
             q = q_CMND[el]
             e = e_CMND[el]
             i = i_CMND[el]
@@ -325,8 +325,8 @@ def test_random_variation_optimize():
         print(f"Ratio: {N_numeric / (N_theoretical * N)}")
         list_count_objects.append({"transformation_type": "CMND_complete", "numerical_count": N_numeric, "theoretical_count": N_theoretical * N, "objects_generated": N, "iteration": iter})
         
-    df = pd.concat([df_count_objects, pd.DataFrame(list_count_objects)])
-    df.to_csv("count_objects2.csv", index=False)
+        df = pd.concat([df_count_objects, pd.DataFrame(list_count_objects)])
+        df.to_csv("count_objects2.csv", index=False)
     print("Results saved")
 
 
