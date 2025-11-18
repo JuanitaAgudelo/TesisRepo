@@ -1138,7 +1138,7 @@ def P_X_CMND(x: np.array, y: np.array, z: np.array, vx: np.array, vy: np.array, 
             #print(x_flat[idx], y_flat[idx], z_flat[idx],  vx_flat[idx], vy_flat[idx], vz_flat[idx])
             #print(det)
             if det == 0 or not np.isfinite(det):
-                print("Problematic point: ", x_flat[idx], y_flat[idx], z_flat[idx], vx_flat[idx], vy_flat[idx], vz_flat[idx])
+                #print("Problematic point: ", x_flat[idx], y_flat[idx], z_flat[idx], vx_flat[idx], vy_flat[idx], vz_flat[idx])
                 P.flat[idx] = np.nan
             else:
                 inv_det = 1.0/det 
@@ -1146,3 +1146,54 @@ def P_X_CMND(x: np.array, y: np.array, z: np.array, vx: np.array, vy: np.array, 
                 P.flat[idx] = P_E_CMND(a, e, i, F) * abs(inv_det) * abs(det_QEI)
                 
     return P.reshape(shape)
+
+def surface_integral_P_X_CMND(center, widths, max_elements: list, n_points=8, mu=1, F=mm.FitCMND):
+    """
+    Calculate the surface integral of P_xyvxvy in a hypercube centered at (x, y, vx, vy)
+    with dimensions (dx, dy, dvx, dvy) using Gauss-Legendre quadrature.
+
+    Parameters:
+        center: tuple/list/array of (x, y, vx, vy) center
+        widths: tuple/list/array of (dx, dy, dvx, dvy) side lengths
+        max_elemetns: tuple/list/array of (a_max, e_max, i_max) max elements
+        n_points: number of quadrature points per dimension
+
+    Returns:
+        Integral (float)
+    """
+    from numpy.polynomial.legendre import leggauss
+
+    x0, y0, z0, vx0, vy0, vz0 = center
+    dx, dy, dz, dvx, dvy, dvz = widths
+    q_max, e_max, i_max = max_elements
+
+    # Get Gauss-Legendre points and weights for [-1, 1]
+    pts, wts = leggauss(n_points)
+
+    # Map points from [-1, 1] to [center-width/2, center+width/2] for each dimension
+    x_pts = x0 + 0.5*dx*pts
+    y_pts = y0 + 0.5*dy*pts
+    z_pts = z0 + 0.5*dz*pts
+    vx_pts = vx0 + 0.5*dvx*pts
+    vy_pts = vy0 + 0.5*dvy*pts
+    vz_pts = vz0 + 0.5*dvz*pts
+
+    # Create meshgrid of all quadrature points
+    X, Y, Z, VX, VY, VZ = np.meshgrid(x_pts, y_pts, z_pts, vx_pts, vy_pts, vz_pts, indexing='ij')
+    WX, WY, WZ, WVX, WVY, WVZ = np.meshgrid(wts, wts, wts, wts, wts, wts, indexing='ij')
+
+    # Flatten for vectorized evaluation
+    Xf = X.ravel()
+    Yf = Y.ravel()
+    Zf = Z.ravel()
+    VXf = VX.ravel()
+    VYf = VY.ravel()
+    VZf = VZ.ravel()
+    WF = (WX * WY * WZ * WVX * WVY * WVZ).ravel()
+    # Evaluate P at all points
+    Pf = P_X_CMND(Xf, Yf, Zf, VXf, VYf, VZf, q_max, e_max, i_max, mu, F=F)
+
+    # Integral is sum(P * weight) * volume factor
+    integral = np.sum(Pf * WF) * (0.5*dx) * (0.5*dy) * (0.5*dz) * (0.5*dvx) * (0.5*dvy) * (0.5*dvz)
+    #return integral, y_points
+    return integral
