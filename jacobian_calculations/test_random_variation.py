@@ -265,7 +265,7 @@ def hypercube_test_random_variation_optimize():
 
     F = mm.FitCMND(f"../multimin/products/fit-NEAs-qei-Ng10-Nv3-rad.pkl")
 
-    N = int(1e6)
+    N = int(1e7)
     print(f"N = {N:e}")
 
     #max elements
@@ -289,7 +289,7 @@ def hypercube_test_random_variation_optimize():
     prob = hypercube_surface_integral_P_X_CMND(center, widths, max_elements=max_elements, n_points=8, mu=mu, F=F)
     N_theoretical = prob * N
 
-    iterations = 10
+    iterations = 20
     #df_count_objects = pd.DataFrame(columns=["transformation_type", "numerical_count", "theoretical_count", "objects_generated"])
     df_count_objects = pd.read_csv("count_objects4.csv")
     list_count_objects = []
@@ -345,6 +345,7 @@ def hypercube_test_random_variation_optimize():
                                     "theoretical_count": N_theoretical, 
                                     "objects_generated": N, 
                                     "iteration": iter, 
+                                    "ratio": N_theoretical/N_numeric,
                                     "description": "hypercube",
                                     "integration_params": {"center": center, "widths": widths}})
 
@@ -358,7 +359,7 @@ def sphere_test_random_variation_optimize():
 
     F = mm.FitCMND(f"../multimin/products/fit-NEAs-qei-Ng10-Nv3-rad.pkl")
 
-    N = int(1e7)
+    N = int(1e6)
     print(f"N = {N:e}")
 
     c_x, c_y, c_z = 1.0, 0.0, 0.0
