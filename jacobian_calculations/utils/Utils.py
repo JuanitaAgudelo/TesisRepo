@@ -782,7 +782,7 @@ def trasformation_X_to_E(x: float, y: float, z: float, vx: float, vy: float, vz:
     M = elements[5]
     a = q/(1-e)
 
-    return a, e, i, Omega, w, M
+    return q, e, i, Omega, w, M, a
 
 def P_E() -> float:
     a_max = 2; a_min = 0
