@@ -1,0 +1,4 @@
+# P(X) XY plane integration cube position and spheric velocity
+#  x_min=0.7, x_max=0.8, y_min=0.7, y_max=0.8, dx_cell=0.1, dy_cell=0.1, dz=0.1, vx_center=0.01, vy_center=(mu/a)**0.5, vz_center=0.01
+nan, 1.402458003209369601e-04
+1.359604693262330614e-04, 1.824783752608755659e-04
