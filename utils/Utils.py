@@ -758,8 +758,7 @@ def compute_jacobian_XoE(a: float, e: float, i: float, Omega: float, w: float, M
     return JX2c
 
 
-def trasformation_E_to_X(a: float, e: float, i: float, Omega: float, w: float, M: float, mu: float) -> tuple[float, float, float, float, float, float]:
-    q = a*(1-e)
+def trasformation_E_to_X(q: float, e: float, i: float, Omega: float, w: float, M: float, mu: float) -> tuple[float, float, float, float, float, float]:
 
     state_vec = compute_state_vector([q, e, i, Omega, w, M], mu)
     x = state_vec[0]
@@ -1077,10 +1076,9 @@ def surface_integral_P_xyvxvy(center, widths, n_points=8, mu=1):
     return integral
 
 
-def P_E_CMND(a: float, e: float, i: float, F: mm.FitCMND) -> float:
+def P_E_CMND(q: float, e: float, i: float, F: mm.FitCMND) -> float:
     max = 2*np.pi; min = 0
 
-    q = a*(1-e)
     element = np.array([q, e, i])
     scales=[1.35,1.00,np.pi]
     u_element = mm.Util.tIF(element, scales, mm.Util.f2u)
@@ -1091,17 +1089,17 @@ def P_E_CMND(a: float, e: float, i: float, F: mm.FitCMND) -> float:
     return P_qei * P_WwM
 
 def Jacobian_qei_to_QEI(q: float, e: float, i: float, q_max: float, e_max: float, i_max: float) -> np.array:
-    partialA_a = q_max/(q*(q_max - q))
-    partialA_e = 0
-    partialA_i = 0
-    partialE_a = 0
+    partialQ_q = q_max/(q*(q_max - q))
+    partialQ_e = 0
+    partialQ_i = 0
+    partialE_q = 0
     partialE_e = e_max/(e*(e_max - e))
     partialE_i = 0
-    partialI_a = 0
+    partialI_q = 0
     partialI_e = 0
     partialI_i = i_max/(i*(i_max - i))
 
-    Jacobian = np.array([[partialA_a, partialA_e, partialA_i], [partialE_a, partialE_e, partialE_i], [partialI_a, partialI_e, partialI_i]])
+    Jacobian = np.array([[partialQ_q, partialQ_e, partialQ_i], [partialE_q, partialE_e, partialE_i], [partialI_q, partialI_e, partialI_i]])
     return Jacobian
 
 def P_X_CMND(x: np.array, y: np.array, z: np.array, vx: np.array, vy: np.array, vz: np.array, q_max: float, e_max: float, i_max: float, mu: float, F: mm.FitCMND) -> np.array:
@@ -1128,26 +1126,32 @@ def P_X_CMND(x: np.array, y: np.array, z: np.array, vx: np.array, vy: np.array, 
     vz_flat = vz.ravel()
 
     for idx in range(x_flat.size):
-        a, e, i, Omega, w, M = trasformation_X_to_E(x_flat[idx], y_flat[idx], z_flat[idx], vx_flat[idx], vy_flat[idx], vz_flat[idx], mu)
-        q = a*(1-e)
+        q, e, i, Omega, w, M, a = trasformation_X_to_E(x_flat[idx], y_flat[idx], z_flat[idx], vx_flat[idx], vy_flat[idx], vz_flat[idx], mu)
+        print("evaluating at: ", x_flat[idx], y_flat[idx], z_flat[idx], vx_flat[idx], vy_flat[idx], vz_flat[idx])
+        print("orbital elements: ", q, e, i, Omega, w, M, a)
         J = compute_jacobian_XoE(a,e,i,Omega,w,M,mu)
         J_qei_to_QEI = Jacobian_qei_to_QEI(q,e,i,q_max,e_max,i_max)
+        if q > 1.35 or e > 1:
+            print(" ----------------- Not sense orbit -----------------")
+            #continue
         with np.errstate(divide='ignore', invalid='ignore'):
             det = np.linalg.det(J)
             det_QEI = np.linalg.det(J_qei_to_QEI)
             #print(x_flat[idx], y_flat[idx], z_flat[idx],  vx_flat[idx], vy_flat[idx], vz_flat[idx])
             #print(det)
             if det == 0 or not np.isfinite(det):
-                #print("Problematic point: ", x_flat[idx], y_flat[idx], z_flat[idx], vx_flat[idx], vy_flat[idx], vz_flat[idx])
+                print(" ----------------- Cero determinant -----------------")
                 P.flat[idx] = np.nan
             else:
                 inv_det = 1.0/det 
+                if np.isnan(P_E_CMND(q, e, i, F) * abs(inv_det) * abs(det_QEI)):
+                    print("Nan value encounter: ", P_E_CMND(a, e, i, F), abs(inv_det), abs(det_QEI))
                 #print(P_E_CMND(a, e, i, F) * abs(inv_det) * abs(det_AEI)) 
-                P.flat[idx] = P_E_CMND(a, e, i, F) * abs(inv_det) * abs(det_QEI)
+                P.flat[idx] = P_E_CMND(q, e, i, F) * abs(inv_det) * abs(det_QEI)
                 
     return P.reshape(shape)
 
-def surface_integral_P_X_CMND(center, widths, max_elements: list, n_points=8, mu=1, F=mm.FitCMND):
+def  surface_integral_P_X_CMND(center, widths, max_elements: list, n_points=8, mu=1, F=mm.FitCMND):
     """
     Calculate the surface integral of P_xyvxvy in a hypercube centered at (x, y, vx, vy)
     with dimensions (dx, dy, dvx, dvy) using Gauss-Legendre quadrature.

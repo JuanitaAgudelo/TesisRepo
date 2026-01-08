@@ -1,0 +1,3 @@
+# P(X) XY plane integration cube position and spheric velocity
+# method: calculate Rv base on a
+#  x_min=0.4, x_max=1.5, y_min=-0.5, y_max=0.5, dx_cell=0.05, dy_cell=0.05
