@@ -1102,22 +1102,52 @@ def Jacobian_qei_to_QEI(q: float, e: float, i: float, q_max: float, e_max: float
     Jacobian = np.array([[partialQ_q, partialQ_e, partialQ_i], [partialE_q, partialE_e, partialE_i], [partialI_q, partialI_e, partialI_i]])
     return Jacobian
 
-def P_X_CMND(x: np.array, y: np.array, z: np.array, vx: np.array, vy: np.array, vz: np.array, q_max: float, e_max: float, i_max: float, mu: float, F: mm.FitCMND) -> np.array:
+def P_X_CMND(x: np.ndarray, y: np.ndarray, z: np.ndarray, vx: np.ndarray, vy: np.ndarray, vz: np.ndarray, 
+              q_max: float, e_max: float, i_max: float, mu: float, F: mm.FitCMND) -> np.ndarray:
     """
-    Vectorized version: x, y, vx, vy are arrays (or scalars).
-    Returns array of P values.
+    Compute probability density function of NEAs in phase space (X).
+    
+    Vectorized version: x, y, z, vx, vy, vz are arrays (or scalars).
+    Returns array of probability values.
+    
+    Parameters:
+    -----------
+    x, y, z : np.ndarray
+        Position coordinates (arrays or scalars)
+    vx, vy, vz : np.ndarray
+        Velocity coordinates (arrays or scalars)
+    q_max : float
+        Maximum perihelion distance for NEA classification (AU)
+    e_max : float
+        Maximum eccentricity for valid orbits
+    i_max : float
+        Maximum inclination
+    mu : float
+        Gravitational parameter
+    F : mm.FitCMND
+        CMND fit model for orbital elements PDF
+        
+    Returns:
+    --------
+    np.ndarray
+        Probability density values, same shape as broadcasted input arrays
     """
+    # Constants for NEA orbit validation
+    Q_MAX_NEA = 1.3  # Maximum perihelion distance for NEA classification (AU)
+    E_MAX_VALID = 1.0  # Maximum eccentricity for valid elliptical orbits
+    
+    # Convert inputs to arrays and get broadcast shape
     x = np.asarray(x)
     y = np.asarray(y)
     z = np.asarray(z)
     vx = np.asarray(vx)
     vy = np.asarray(vy)
     vz = np.asarray(vz)
-    # Prepare output array
+    
     shape = np.broadcast(x, y, z, vx, vy, vz).shape
     P = np.empty(shape, dtype=float)
 
-    # Flatten for iteration if needed
+    # Flatten arrays for iteration
     x_flat = x.ravel()
     y_flat = y.ravel()
     z_flat = z.ravel()
@@ -1125,24 +1155,37 @@ def P_X_CMND(x: np.array, y: np.array, z: np.array, vx: np.array, vy: np.array, 
     vy_flat = vy.ravel()
     vz_flat = vz.ravel()
 
+    # Process each point in the flattened arrays
     for idx in range(x_flat.size):
-        a, e, i, Omega, w, M = trasformation_X_to_E(x_flat[idx], y_flat[idx], z_flat[idx], vx_flat[idx], vy_flat[idx], vz_flat[idx], mu)
-        q = a*(1-e)
-        J = compute_jacobian_XoE(a,e,i,Omega,w,M,mu)
-        J_qei_to_QEI = Jacobian_qei_to_QEI(q,e,i,q_max,e_max,i_max)
-        with np.errstate(divide='ignore', invalid='ignore'):
-            det = np.linalg.det(J)
-            det_QEI = np.linalg.det(J_qei_to_QEI)
-            #print(x_flat[idx], y_flat[idx], z_flat[idx],  vx_flat[idx], vy_flat[idx], vz_flat[idx])
-            #print(det)
-            if det == 0 or not np.isfinite(det):
-                print("Problematic point: ", x_flat[idx], y_flat[idx], z_flat[idx], vx_flat[idx], vy_flat[idx], vz_flat[idx])
-                P.flat[idx] = np.nan
-            else:
-                inv_det = 1.0/det 
-                #print(P_E_CMND(a, e, i, F) * abs(inv_det) * abs(det_AEI)) 
-                P.flat[idx] = P_E_CMND(a, e, i, F) * abs(inv_det) * abs(det_QEI)
-                
+        # Transform from Cartesian to orbital elements
+        q, e, i, Omega, w, M, a = trasformation_X_to_E(
+            x_flat[idx], y_flat[idx], z_flat[idx], 
+            vx_flat[idx], vy_flat[idx], vz_flat[idx], mu
+        )
+        
+        # Validate orbit: must be NEA (q <= Q_MAX_NEA) and elliptical (e < E_MAX_VALID)
+        if q > Q_MAX_NEA or e >= E_MAX_VALID:
+            P.flat[idx] = 0.0
+            continue
+
+        # Compute Jacobian matrices
+        jacobian_X_to_E = compute_jacobian_XoE(a, e, i, Omega, w, M, mu)
+        jacobian_qei_to_QEI = Jacobian_qei_to_QEI(q, e, i, q_max, e_max, i_max)
+
+        #compute determinants
+        det_X_to_E = np.linalg.det(jacobian_X_to_E)
+        det_QEI = jacobian_qei_to_QEI[0,0] * jacobian_qei_to_QEI[1,1] * jacobian_qei_to_QEI[2,2]
+        
+        # Check for computational inconsistencies
+        if det_X_to_E == 0 or not np.isfinite(det_X_to_E):
+            P.flat[idx] = np.nan
+            continue
+        
+        # Compute probability density
+        inv_det_X_to_E = 1.0 / det_X_to_E
+        pdf_orbital_elements = P_E_CMND(q, e, i, F)
+        P.flat[idx] = pdf_orbital_elements * abs(inv_det_X_to_E) * abs(det_QEI)
+                    
     return P.reshape(shape)
 
 

@@ -18,8 +18,8 @@ from utils.Utils import (
     GravitationalParameters, 
     trasformation_E_to_X, 
     trasformation_X_to_E,
-    P_E, 
-    P_X_vectorized,
+    P_E_CMND,
+    Jacobian_qei_to_QEI,
     )
 
 #constants
@@ -31,37 +31,6 @@ year = 365.25*24*3600 #s
 mu = CanonicalUnits().mu
 grav_params = GravitationalParameters(mu=mu)
 
-def P_E_CMND(a: float, e: float, i: float, F: mm.FitCMND) -> float:
-    max = 2*np.pi; min = 0
-
-    q = a*(1-e)
-    element = np.array([q, e, i])
-    scales=[1.35,1.00,np.pi]
-    u_element = mm.Util.tIF(element, scales, mm.Util.f2u)
-
-    P_qei = F.cmnd.pdf(u_element)
-    P_WwM = 1/(max - min)**3
-
-    return P_qei * P_WwM
-
-def Jacobian_qei_to_QEI(q: float, e: float, i: float, q_max: float, e_max: float, i_max: float) -> np.array:
-    partialA_a = q_max/(q*(q_max - q))
-    partialA_e = 0
-    partialA_i = 0
-    partialE_a = 0
-    partialE_e = e_max/(e*(e_max - e))
-    partialE_i = 0
-    partialI_a = 0
-    partialI_e = 0
-    partialI_i = i_max/(i*(i_max - i))
-
-    Jacobian = np.array([
-        [partialA_a, partialA_e, partialA_i], 
-        [partialE_a, partialE_e, partialE_i], 
-        [partialI_a, partialI_e, partialI_i]
-        ])
-        
-    return Jacobian
 
 def P_X_CMND(x: np.array, y: np.array, z: np.array, vx: np.array, vy: np.array, vz: np.array, q_max: float, e_max: float, i_max: float, mu: float, F: mm.FitCMND) -> np.array:
     """
@@ -86,32 +55,36 @@ def P_X_CMND(x: np.array, y: np.array, z: np.array, vx: np.array, vy: np.array, 
     vy_flat = vy.ravel()
     vz_flat = vz.ravel()
 
-    neas_number = 0
-    not_neas_number = 0
+    #neas_number = 0
+    #not_neas_number = 0
 
     for idx in range(x_flat.size):
-        a, e, i, Omega, w, M = trasformation_X_to_E(x_flat[idx], y_flat[idx], z_flat[idx], vx_flat[idx], vy_flat[idx], vz_flat[idx], mu)
-        q = a*(1-e)
-        if q > 1.3 or e > 1: 
+        q, e, i, Omega, w, M, a = trasformation_X_to_E(x_flat[idx], y_flat[idx], z_flat[idx], vx_flat[idx], vy_flat[idx], vz_flat[idx], mu)
+        if q > 1.35 or e >= 1: 
+            #v = (vx_flat[idx]**2 + vy_flat[idx]**2 + vz_flat[idx]**2)**0.5
+            #print('evaluating: ', x_flat[idx], y_flat[idx], z_flat[idx], vx_flat[idx], vy_flat[idx], vz_flat[idx])
+            #print('not valid orbital elements: ', q, e, i, Omega, w, M, a, v)
+            #if v > 8:
+                #print('velocity is too high: ', v)
             P.flat[idx] = 0
-            neas_number += 1
+            #neas_number += 1
         else: 
             J = compute_jacobian_XoE(a,e,i,Omega,w,M,mu)
             J_qei_to_QEI = Jacobian_qei_to_QEI(q,e,i,q_max,e_max,i_max)
             with np.errstate(divide='ignore', invalid='ignore'):
                 det = np.linalg.det(J)
-                det_QEI = np.linalg.det(J_qei_to_QEI)
+                det_QEI = J_qei_to_QEI[0,0] * J_qei_to_QEI[1,1] * J_qei_to_QEI[2,2]
                 if det == 0 or not np.isfinite(det):
-                    print("Problematic point: ", x_flat[idx], y_flat[idx], z_flat[idx], vx_flat[idx], vy_flat[idx], vz_flat[idx])
+                    #print("Problematic point: ", x_flat[idx], y_flat[idx], z_flat[idx], vx_flat[idx], vy_flat[idx], vz_flat[idx])
                     P.flat[idx] = np.nan
                 else:
                     inv_det = 1.0/det 
-                    P.flat[idx] = P_E_CMND(a, e, i, F) * abs(inv_det) * abs(det_QEI)
-                    not_neas_number += 1
+                    P.flat[idx] = P_E_CMND(q, e, i, F) * abs(inv_det) * abs(det_QEI)
+                    #not_neas_number += 1
 
-                    if np.isnan(P_E_CMND(a, e, i, F) * abs(inv_det) * abs(det_QEI)):
-                        print('Nan value encounter: ', P_E_CMND(a, e, i, F), abs(inv_det), abs(det_QEI))
-                        print("Problematic point: ", x_flat[idx], y_flat[idx], z_flat[idx], vx_flat[idx], vy_flat[idx], vz_flat[idx])
+                    #if np.isnan(P_E_CMND(q, e, i, F) * abs(inv_det) * abs(det_QEI)):
+                    #    print('Nan value encounter: ', P_E_CMND(a, e, i, F), abs(inv_det), abs(det_QEI))
+                    #    print("Problematic point: ", x_flat[idx], y_flat[idx], z_flat[idx], vx_flat[idx], vy_flat[idx], vz_flat[idx])
                     
     return P.reshape(shape)
 
@@ -265,7 +238,7 @@ def hypercube_test_random_variation_optimize():
 
     F = mm.FitCMND(f"../multimin/products/fit-NEAs-qei-Ng10-Nv3-rad.pkl")
 
-    N = int(1e7)
+    N = int(1e8)
     print(f"N = {N:e}")
 
     #max elements
@@ -276,22 +249,22 @@ def hypercube_test_random_variation_optimize():
     c_y = 0
     c_z = 0
     v_x = 0
-    v_y = (mu/1)**0.5
+    v_y = (mu/1.0)**0.5
     v_z = 0
 
-    dxyz = 0.2
-    dvxyz = 5000 * (1/AU_m) * year 
+    dxyz = 0.1
+    dvxyz = 2000 * (1/AU_m) * year 
 
     center = (c_x, c_y, c_z, v_x, v_y, v_z)
     widths = (dxyz, dxyz, dxyz, dvxyz, dvxyz, dvxyz)
 
     # Theoretical: compute expected number of objects in the volume by integrating the distribution
-    prob = hypercube_surface_integral_P_X_CMND(center, widths, max_elements=max_elements, n_points=8, mu=mu, F=F)
+    prob = hypercube_surface_integral_P_X_CMND(center, widths, max_elements=max_elements, n_points=6, mu=mu, F=F)
     N_theoretical = prob * N
 
     iterations = 20
     #df_count_objects = pd.DataFrame(columns=["transformation_type", "numerical_count", "theoretical_count", "objects_generated"])
-    df_count_objects = pd.read_csv("count_objects4.csv")
+    df_count_objects = pd.read_csv("count_objects5.csv")
     list_count_objects = []
 
     for iter in range(iterations):
@@ -321,9 +294,8 @@ def hypercube_test_random_variation_optimize():
             Omega = Omega_uniform[el]
             w = w_uniform[el]
             M = M_uniform[el]
-            a = q/(1-e)
 
-            x, y, z, vx, vy, vz = trasformation_E_to_X(a, e, i, Omega, w, M, mu)
+            x, y, z, vx, vy, vz = trasformation_E_to_X(q, e, i, Omega, w, M, mu)
             state_vectors[el] = np.array([x, y, z, vx, vy, vz])
 
         objsx = (abs(state_vectors[:,0] - c_x) <= dxyz/2) 
@@ -350,7 +322,7 @@ def hypercube_test_random_variation_optimize():
                                     "integration_params": {"center": center, "widths": widths}})
 
     df = pd.concat([df_count_objects, pd.DataFrame(list_count_objects)])
-    df.to_csv("count_objects4.csv", index=False)
+    df.to_csv("count_objects5.csv", index=False)
     print("Results saved")
 
 
@@ -359,7 +331,7 @@ def sphere_test_random_variation_optimize():
 
     F = mm.FitCMND(f"../multimin/products/fit-NEAs-qei-Ng10-Nv3-rad.pkl")
 
-    N = int(1e6)
+    N = int(1e7)
     print(f"N = {N:e}")
 
     c_x, c_y, c_z = 1.0, 0.0, 0.0
